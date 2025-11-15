@@ -37,6 +37,8 @@ TERM_WIDTH=0
 TERM_HEIGHT=0
 NEED_REDRAW=1
 RUNNING=1
+FIRST_DRAW=1
+LAST_REFRESH=0
 
 # Get terminal dimensions
 get_terminal_size() {
@@ -46,7 +48,7 @@ get_terminal_size() {
 
 # Draw horizontal line
 draw_line() {
-    local char="${1:-─}"
+    local char="${1:--}"
     local width="${2:-$TERM_WIDTH}"
     printf "%${width}s" | tr ' ' "$char"
 }
@@ -61,30 +63,30 @@ draw_box() {
 
     # Top border
     tput cup $y $x
-    echo -n "╭"
-    draw_line "─" $((width - 2))
-    echo -n "╮"
+    echo -n "+"
+    draw_line "-" $((width - 2))
+    echo -n "+"
 
     # Title
     if [ -n "$title" ]; then
         local title_pos=$(( (width - ${#title} - 2) / 2 ))
         tput cup $y $((x + title_pos))
-        echo -n "┤ $title ┤"
+        echo -n "[ $title ]"
     fi
 
     # Sides
     for ((i=1; i<height-1; i++)); do
         tput cup $((y + i)) $x
-        echo -n "│"
+        echo -n "|"
         tput cup $((y + i)) $((x + width - 1))
-        echo -n "│"
+        echo -n "|"
     done
 
     # Bottom border
     tput cup $((y + height - 1)) $x
-    echo -n "╰"
-    draw_line "─" $((width - 2))
-    echo -n "╯"
+    echo -n "+"
+    draw_line "-" $((width - 2))
+    echo -n "+"
 }
 
 # Draw header
@@ -97,7 +99,7 @@ draw_header() {
     printf "%${TERM_WIDTH}s" " "
 
     # Center title
-    local title="🚀 BITS TORRENT DOWNLOADER DASHBOARD 🚀"
+    local title="*** BITS TORRENT DOWNLOADER DASHBOARD ***"
     local title_pos=$(( (TERM_WIDTH - ${#title}) / 2 ))
     tput cup 0 $title_pos
     echo -n "$title"
@@ -106,7 +108,7 @@ draw_header() {
     # Subtitle
     tput cup 1 0
     echo -ne "${COLORS[CYAN]}${COLORS[DIM]}"
-    local subtitle="Real-time Monitoring • Responsive Design • Terminal Width: ${TERM_WIDTH} × Height: ${TERM_HEIGHT}"
+    local subtitle="Real-time Monitoring - Responsive Design - Terminal Width: ${TERM_WIDTH} x Height: ${TERM_HEIGHT}"
     local subtitle_pos=$(( (TERM_WIDTH - ${#subtitle}) / 2 ))
     tput cup 1 $subtitle_pos
     echo -n "$subtitle"
@@ -115,7 +117,7 @@ draw_header() {
     # Separator
     tput cup 2 0
     echo -ne "${COLORS[BLUE]}"
-    draw_line "═" $TERM_WIDTH
+    draw_line "=" $TERM_WIDTH
     echo -ne "${COLORS[RESET]}"
 }
 
@@ -126,7 +128,7 @@ draw_footer() {
     # Separator
     tput cup $((footer_y - 1)) 0
     echo -ne "${COLORS[BLUE]}"
-    draw_line "═" $TERM_WIDTH
+    draw_line "=" $TERM_WIDTH
     echo -ne "${COLORS[RESET]}"
 
     # Footer content
@@ -134,7 +136,7 @@ draw_footer() {
     echo -ne "${COLORS[BG_BLACK]}${COLORS[CYAN]}"
     printf "%${TERM_WIDTH}s" " "
 
-    local footer_text="Press 'q' to quit • 'r' to refresh • 's' to start torrents • 't' to stop torrents"
+    local footer_text="Press 'q' to quit - 'r' to refresh - 's' to start torrents - 't' to stop torrents"
     local footer_pos=$(( (TERM_WIDTH - ${#footer_text}) / 2 ))
     tput cup $footer_y $footer_pos
     echo -n "$footer_text"
@@ -143,7 +145,7 @@ draw_footer() {
     tput cup $((footer_y + 1)) 0
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     echo -ne "${COLORS[GREEN]}"
-    echo -n "⚡ Status: RUNNING"
+    echo -n "> Status: RUNNING"
     tput cup $((footer_y + 1)) $((TERM_WIDTH - ${#timestamp} - 1))
     echo -n "$timestamp"
     echo -ne "${COLORS[RESET]}"
@@ -243,12 +245,12 @@ draw_stats_section() {
     local active_conn=$(netstat -an 2>/dev/null | grep ESTABLISHED | wc -l)
     echo -ne "${COLORS[BLUE]}Connections: $active_conn${COLORS[RESET]}"
     tput cup $((stats_y + 2)) $((col_width * 2 + 3))
-    echo -ne "${COLORS[GREEN]}Status: ●${COLORS[RESET]}"
+    echo -ne "${COLORS[GREEN]}Status: [ONLINE]${COLORS[RESET]}"
 }
 
 # Draw fancy loading animation
 draw_loading() {
-    local frames=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+    local frames=("|" "/" "-" "\\")
     local frame=${frames[$((RANDOM % ${#frames[@]}))]}
     echo -ne "${COLORS[CYAN]}$frame${COLORS[RESET]}"
 }
@@ -257,8 +259,14 @@ draw_loading() {
 draw_screen() {
     get_terminal_size
 
-    # Clear and prepare
-    echo -ne "$CLEAR_SCREEN$CURSOR_HOME$HIDE_CURSOR"
+    # Only clear screen on first draw to prevent flickering
+    if [ $FIRST_DRAW -eq 1 ]; then
+        echo -ne "$CLEAR_SCREEN"
+        FIRST_DRAW=0
+    fi
+
+    # Position cursor at home and hide it
+    echo -ne "$CURSOR_HOME$HIDE_CURSOR"
 
     # Draw all sections
     draw_header
@@ -266,13 +274,15 @@ draw_screen() {
     draw_stats_section
     draw_footer
 
-    # Reset cursor
+    # Reset cursor (keep it hidden during updates)
     echo -ne "$SHOW_CURSOR"
 }
 
 # Handle terminal resize
 handle_resize() {
     NEED_REDRAW=1
+    # Clear screen on resize to handle new dimensions
+    FIRST_DRAW=1
 }
 
 # Cleanup on exit
@@ -327,6 +337,7 @@ main() {
         if [ $NEED_REDRAW -eq 1 ]; then
             draw_screen
             NEED_REDRAW=0
+            LAST_REFRESH=$(date +%s)
         fi
 
         # Handle input
@@ -335,9 +346,9 @@ main() {
         # Auto-refresh every 2 seconds
         sleep 0.5
 
-        # Periodic redraw
+        # Periodic redraw (only if 2 seconds have passed)
         local current_time=$(date +%s)
-        if [ $((current_time % 2)) -eq 0 ]; then
+        if [ $((current_time - LAST_REFRESH)) -ge 2 ]; then
             NEED_REDRAW=1
         fi
     done
