@@ -1,10 +1,14 @@
 #!/bin/bash
 
+# Get script directory and project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 # Configuration
-TORRENT_DIR="/data/bimmercodes/bits-downloader/torrents"
-DOWNLOAD_DIR="/data/downloads"
-LOG_DIR="/data/bimmercodes/bits-downloader/logs"
-TORRENT_LIST="/data/bimmercodes/bits-downloader/data/torrent_list.txt"
+TORRENT_DIR="$PROJECT_ROOT/torrents"
+DOWNLOAD_DIR="$PROJECT_ROOT/downloads"
+LOG_DIR="$PROJECT_ROOT/logs"
+TORRENT_LIST="$PROJECT_ROOT/data/torrent_list.txt"
 MAIN_LOG="$LOG_DIR/torrent_manager.log"
 PID_FILE="/tmp/torrent_manager.pid"
 

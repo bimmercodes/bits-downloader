@@ -1,7 +1,8 @@
 #!/bin/bash
 
-PROJECT_ROOT="/data/bimmercodes/bits-downloader"
-LOG_DIR="/data/bimmercodes/bits-downloader/logs"
+BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$BIN_DIR/.." && pwd)"
+LOG_DIR="$PROJECT_ROOT/logs"
 mkdir -p "$LOG_DIR"
 
 # Check if already running
