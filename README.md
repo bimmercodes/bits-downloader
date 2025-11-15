@@ -1,5 +1,5 @@
 # 🚀 BITS-DOWNLOADER
-<img width="1290" height="615" alt="image" src="https://github.com/user-attachments/assets/10f857ed-1069-444f-bb44-ae4d052dc02b" />
+<img width="1014" height="629" alt="image" src="https://github.com/user-attachments/assets/9030e136-87fc-4060-8304-b3094ee8bd62" />
 
 **A powerful, feature-rich BitTorrent downloader with beautiful terminal UI**
 
@@ -385,8 +385,8 @@ Want to see it in action? Run the responsive demo:
 ```bash
 ./ui/demo_responsive.sh
 ```
-<img width="1406" height="603" alt="image" src="https://github.com/user-attachments/assets/aec6fcba-5a9e-442e-a436-85e896f245fe" />
 
+<img width="1394" height="687" alt="image" src="https://github.com/user-attachments/assets/1e580d9c-05b3-4411-b112-30c03f07c221" />
 
 Try resizing your terminal to see the responsive design magic! ✨
 
