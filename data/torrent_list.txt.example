@@ -7,8 +7,5 @@
 # /path/to/local/file.torrent
 #
 # Add your torrent links below:
-/data/torrents/torrents/4.40.50_PSdZData.7z.torrent
-/data/torrents/torrents/ISTA_4.13.14_18-03_ILEVEL_ID4_ID6_FLASH.torrent
-/data/torrents/torrents/ISTA_4.56.20_PSdZData.7z.torrent 
-/data/torrents/torrents/ISTA_4.56.32_PSdZData.7z.torrent 
-/data/torrents/torrents/ISTA_Standalone_4.39.20.torrent
+/data/torrents/torrents/4.40.50_Data.7z.torrent
+
