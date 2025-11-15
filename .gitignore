@@ -1,0 +1,45 @@
+# User configuration
+.config
+.installed
+
+# Downloads
+downloads/*
+!downloads/.gitkeep
+
+# Logs
+logs/*
+!logs/.gitkeep
+torrent_logs/*
+
+# Torrents
+torrents/*
+!torrents/.gitkeep
+
+# Temporary files
+*.swp
+*.swo
+*~
+.*.swp
+
+# Process IDs
+*.pid
+/tmp/
+
+# Data files (user-specific)
+data/torrent_list.txt
+
+# Keep example file
+!data/torrent_list.txt.example
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.sublime-*
+
+# Backup files
+*.bak
+*.backup

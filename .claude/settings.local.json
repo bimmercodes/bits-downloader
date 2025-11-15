@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./start_torrents.sh)",
+      "Bash(./monitor_torrents.sh:*)",
+      "Bash(transmission-remote:*)",
+      "Bash(sudo find:*)",
+      "Bash(sudo systemctl status:*)",
+      "Bash(service transmission-daemon:*)",
+      "Bash(sudo cat:*)",
+      "Bash(sudo systemctl stop:*)",
+      "Bash(sudo systemctl disable:*)",
+      "Bash(./stop_torrents.sh:*)",
+      "Bash(cat:*)",
+      "Bash(pgrep:*)",
+      "Bash(pkill:*)",
+      "Bash(transmission-daemon:*)",
+      "Bash(sudo netstat:*)",
+      "Bash(sudo ls:*)",
+      "Bash(transmission-show:*)",
+      "Bash(chmod:*)",
+      "Bash(tree:*)",
+      "Bash(bash:*)",
+      "Bash(bash -n:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

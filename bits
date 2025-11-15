@@ -1,0 +1,9 @@
+#!/bin/bash
+
+# BITS-DOWNLOADER - Quick Launcher
+# Convenience script to launch bits-downloader from project root
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Launch the main application
+exec "$SCRIPT_DIR/bin/bits-downloader.sh" "$@"
