@@ -384,6 +384,8 @@ Want to see it in action? Run the responsive demo:
 ```bash
 ./ui/demo_responsive.sh
 ```
+<img width="1406" height="603" alt="image" src="https://github.com/user-attachments/assets/aec6fcba-5a9e-442e-a436-85e896f245fe" />
+
 
 Try resizing your terminal to see the responsive design magic! ✨
 
