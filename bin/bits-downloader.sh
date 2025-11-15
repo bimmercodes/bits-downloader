@@ -526,19 +526,29 @@ add_torrent() {
     fi
 
     echo -e "${WHITE}Enter magnet link, URL, or file path:${NC}"
+    echo -e "${GRAY}(magnet:?xt=... or http://... or /path/to/file.torrent)${NC}"
     read -p "> " torrent
 
     if [ -z "$torrent" ]; then
+        echo ""
         echo -e "${YELLOW}No torrent specified${NC}"
     else
         echo ""
-        echo "Adding torrent..."
-        transmission-remote -a "$torrent"
 
-        if [ $? -eq 0 ]; then
-            echo -e "${GREEN}✓ Torrent added successfully${NC}"
+        # Validate input
+        if [[ "$torrent" =~ ^magnet: ]] || [[ "$torrent" =~ ^http ]] || [ -f "$torrent" ]; then
+            echo "Adding torrent..."
+            transmission-remote -a "$torrent" 2>&1
+
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}✓ Torrent added successfully${NC}"
+            else
+                echo -e "${RED}✗ Failed to add torrent${NC}"
+                echo -e "${YELLOW}Check that the link/file is valid${NC}"
+            fi
         else
-            echo -e "${RED}✗ Failed to add torrent${NC}"
+            echo -e "${RED}✗ Invalid input${NC}"
+            echo -e "${YELLOW}Must be a magnet link, HTTP URL, or valid file path${NC}"
         fi
     fi
 

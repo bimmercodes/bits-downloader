@@ -6,6 +6,15 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# Cleanup function
+cleanup() {
+    echo -e "\n${GREEN}Exiting control panel...${NC}"
+    exit 0
+}
+
+# Trap for clean exit
+trap cleanup INT TERM
+
 show_menu() {
     echo -e "${GREEN}═══════════════════════════════════════════${NC}"
     echo -e "${GREEN}     TORRENT CONTROL PANEL${NC}"
@@ -30,9 +39,13 @@ if ! transmission-remote -l &>/dev/null; then
     exit 1
 fi
 
+# Clear screen before starting
+clear
+
 while true; do
     show_menu
     read -p "Select option: " choice
+    echo ""
     
     case $choice in
         1)
@@ -42,16 +55,29 @@ while true; do
             ;;
         2)
             transmission-remote -l
+            echo ""
             read -p "Enter torrent ID to pause: " id
-            transmission-remote -t "$id" -S
+            if [ -n "$id" ]; then
+                transmission-remote -t "$id" -S
+                [ $? -eq 0 ] && echo -e "${GREEN}✓ Torrent $id paused${NC}" || echo -e "${RED}✗ Failed to pause torrent${NC}"
+            else
+                echo -e "${YELLOW}No ID entered${NC}"
+            fi
             ;;
         3)
             transmission-remote -l
+            echo ""
             read -p "Enter torrent ID to resume: " id
-            transmission-remote -t "$id" -s
+            if [ -n "$id" ]; then
+                transmission-remote -t "$id" -s
+                [ $? -eq 0 ] && echo -e "${GREEN}✓ Torrent $id resumed${NC}" || echo -e "${RED}✗ Failed to resume torrent${NC}"
+            else
+                echo -e "${YELLOW}No ID entered${NC}"
+            fi
             ;;
         4)
             transmission-remote -l
+            echo ""
             read -p "Enter torrent ID to remove: " id
             read -p "Delete files too? (y/n): " delete
             if [ "$delete" = "y" ]; then
@@ -91,26 +117,46 @@ while true; do
             ;;
         5)
             transmission-remote -t all -S
-            echo "All torrents paused"
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}✓ All torrents paused${NC}"
+            else
+                echo -e "${RED}✗ Failed to pause torrents${NC}"
+            fi
             ;;
         6)
             transmission-remote -t all -s
-            echo "All torrents resumed"
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}✓ All torrents resumed${NC}"
+            else
+                echo -e "${RED}✗ Failed to resume torrents${NC}"
+            fi
             ;;
         7)
             read -p "Enter download speed limit (KB/s, 0 for unlimited): " speed
-            transmission-remote -d "$speed"
-            echo "Download speed limit set to $speed KB/s"
+            if [ -n "$speed" ]; then
+                transmission-remote -d "$speed"
+                [ $? -eq 0 ] && echo -e "${GREEN}✓ Download speed limit set to $speed KB/s${NC}" || echo -e "${RED}✗ Failed to set speed limit${NC}"
+            else
+                echo -e "${YELLOW}No speed entered${NC}"
+            fi
             ;;
         8)
             read -p "Enter upload speed limit (KB/s, 0 for unlimited): " speed
-            transmission-remote -u "$speed"
-            echo "Upload speed limit set to $speed KB/s"
+            if [ -n "$speed" ]; then
+                transmission-remote -u "$speed"
+                [ $? -eq 0 ] && echo -e "${GREEN}✓ Upload speed limit set to $speed KB/s${NC}" || echo -e "${RED}✗ Failed to set speed limit${NC}"
+            else
+                echo -e "${YELLOW}No speed entered${NC}"
+            fi
             ;;
         9)
             transmission-remote -l
+            echo ""
             read -p "Enter torrent ID for details (or press Enter to skip): " id
-            [ -n "$id" ] && transmission-remote -t "$id" -i
+            if [ -n "$id" ]; then
+                echo ""
+                transmission-remote -t "$id" -i
+            fi
             ;;
         0)
             echo "Exiting..."
@@ -118,6 +164,7 @@ while true; do
             ;;
         *)
             echo -e "${RED}Invalid option${NC}"
+            sleep 1
             ;;
     esac
     

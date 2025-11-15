@@ -14,18 +14,41 @@ CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
 NC='\033[0m'
 
+# Terminal control
+SHOW_CURSOR='\033[?25h'
+
+# Cleanup function
+cleanup() {
+    echo -e "${SHOW_CURSOR}"
+    stty echo 2>/dev/null
+    echo -e "\n${GREEN}Monitor stopped. Returning to menu...${NC}"
+    exit 0
+}
+
+# Trap for clean exit
+trap cleanup INT TERM EXIT
+
 # Function to show detailed torrent info
 show_detailed_info() {
     local ID=$1
 
-    echo -e "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+    clear
+
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
     echo -e "${CYAN}             DETAILED TORRENT INFORMATION${NC}"
     echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}\n"
 
-    transmission-remote -t "$ID" -i 2>/dev/null
+    # Check if ID exists
+    if transmission-remote -t "$ID" -i 2>/dev/null; then
+        echo ""
+    else
+        echo -e "${RED}Error: Invalid torrent ID or torrent not found${NC}"
+    fi
 
     echo -e "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}"
     read -p "Press Enter to return to monitor..."
+    # Clear any extra input
+    read -t 0.1 -n 10000 discard 2>/dev/null || true
 }
 
 clear
@@ -40,9 +63,6 @@ if ! transmission-remote -l &>/dev/null; then
     echo "Start it with: ./start_torrents.sh"
     exit 1
 fi
-
-# Trap Ctrl+C to handle detailed view request
-trap 'read -t 0.1 -n 1 key && [ "$key" = "d" ] && read -p "Enter torrent ID for details: " detail_id && [ -n "$detail_id" ] && show_detailed_info "$detail_id"' INT
 
 while true; do
     clear
@@ -138,7 +158,29 @@ while true; do
     df -h "$DOWNLOAD_DIR" | tail -n 1 | awk '{printf "Used: %s/%s (%s) - Available: %s\n", $3, $2, $5, $4}'
 
     echo -e "\n${BLUE}═══════════════════════════════════════════════════════════════${NC}"
-    echo -e "Press ${CYAN}Ctrl+C then 'd'${NC} for detailed view | ${CYAN}Ctrl+C twice${NC} to exit | Refreshing every 5 seconds..."
+    echo -e "Press ${CYAN}'d'${NC} for detailed view | ${CYAN}'q' or Ctrl+C${NC} to exit | Auto-refresh in 5s..."
 
-    sleep 5
+    # Check for user input (non-blocking with 5 second timeout)
+    read -t 5 -n 1 key 2>/dev/null
+    response=$?
+
+    # Only process if a key was actually pressed (exit status 0)
+    if [ $response -eq 0 ]; then
+        case "$key" in
+            q|Q)
+                cleanup
+                ;;
+            d|D)
+                echo ""
+                read -p "Enter torrent ID for details: " detail_id
+                if [ -n "$detail_id" ]; then
+                    show_detailed_info "$detail_id"
+                fi
+                ;;
+            *)
+                # Clear any other input
+                read -t 0.1 -n 10000 discard 2>/dev/null || true
+                ;;
+        esac
+    fi
 done

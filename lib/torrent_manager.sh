@@ -130,7 +130,9 @@ while true; do
             NAME=$(transmission-remote -t "$ID" -i | grep "Name:" | cut -d: -f2- | xargs)
             if [ -n "$NAME" ]; then
                 echo "[$(date '+%Y-%m-%d %H:%M:%S')] COMPLETED: $NAME" >> "$LOG_DIR/completed.log"
-                transmission-remote -t "$ID" --remove-and-delete &>/dev/null
+                # Remove torrent but keep the downloaded files
+                transmission-remote -t "$ID" -r &>/dev/null
+                log_message "Removed completed torrent (files kept): $NAME"
             fi
         fi
     done <<< "$STATUS"
