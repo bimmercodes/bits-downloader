@@ -1,4 +1,5 @@
 # 🚀 BITS-DOWNLOADER
+<img width="1290" height="615" alt="image" src="https://github.com/user-attachments/assets/10f857ed-1069-444f-bb44-ae4d052dc02b" />
 
 **A powerful, feature-rich BitTorrent downloader with beautiful terminal UI**
 
