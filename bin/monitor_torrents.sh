@@ -1,186 +1,191 @@
 #!/bin/bash
 
+# Torrent Monitor - Interactive torrent monitoring interface
+# Refactored with SOLID and DRY principles
+
+# Get script directory and project root
 BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$BIN_DIR/.." && pwd)"
-LOG_DIR="$PROJECT_ROOT/logs"
-DOWNLOAD_DIR="$PROJECT_ROOT/downloads"
 
-# Color codes
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-MAGENTA='\033[0;35m'
-NC='\033[0m'
-
-# Terminal control
-SHOW_CURSOR='\033[?25h'
+# Source libraries
+source "$PROJECT_ROOT/lib/config.sh"
+source "$PROJECT_ROOT/lib/utils.sh"
+source "$PROJECT_ROOT/lib/transmission_api.sh"
 
 # Cleanup function
 cleanup() {
-    echo -e "${SHOW_CURSOR}"
-    stty echo 2>/dev/null
-    echo -e "\n${GREEN}Monitor stopped. Returning to menu...${NC}"
+    cleanup_terminal
+    echo -e "\n${COLORS[GREEN]}Monitor stopped. Returning to menu...${COLORS[RESET]}"
     exit 0
 }
 
 # Trap for clean exit
 trap cleanup INT TERM EXIT
 
-# Function to show detailed torrent info
+# Function to show detailed torrent info (Single Responsibility)
 show_detailed_info() {
-    local ID=$1
+    local id=$1
 
     clear
+    print_separator "=" 65
+    echo -e "${COLORS[CYAN]}             DETAILED TORRENT INFORMATION${COLORS[RESET]}"
+    print_separator "=" 65
+    echo ""
 
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
-    echo -e "${CYAN}             DETAILED TORRENT INFORMATION${NC}"
-    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}\n"
-
-    # Check if ID exists
-    if transmission-remote -t "$ID" -i 2>/dev/null; then
+    if get_torrent_info "$id"; then
         echo ""
     else
-        echo -e "${RED}Error: Invalid torrent ID or torrent not found${NC}"
+        print_error "Invalid torrent ID or torrent not found"
     fi
 
-    echo -e "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    print_separator "=" 65
     read -p "Press Enter to return to monitor..."
     # Clear any extra input
     read -t 0.1 -n 10000 discard 2>/dev/null || true
 }
 
-clear
+# Display active torrents (Single Responsibility)
+display_active_torrents() {
+    echo -e "${COLORS[GREEN]}ACTIVE DOWNLOADS:${COLORS[RESET]}"
+    print_separator "-" 65
 
-echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}         TORRENT DOWNLOAD MONITOR${NC}"
-echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    local active_count=0
 
-# Check if transmission-daemon is running
-if ! transmission-remote -l &>/dev/null; then
-    echo -e "${RED}ERROR: Transmission-daemon is not running!${NC}"
-    echo "Start it with: ./start_torrents.sh"
-    exit 1
-fi
+    while read -r id; do
+        local name=$(get_torrent_field "$id" "name")
+        local percent=$(get_torrent_field "$id" "percent")
+        local total_size=$(get_torrent_field "$id" "size")
+        local downloaded=$(get_torrent_field "$id" "downloaded")
+        local eta=$(get_torrent_field "$id" "eta")
+        local download_speed=$(get_torrent_field "$id" "download_speed")
+        local peers=$(get_torrent_field "$id" "peers")
 
-while true; do
-    clear
-
-    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}         TORRENT DOWNLOAD MONITOR - $(date '+%H:%M:%S')${NC}"
-    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}\n"
-
-    # Get detailed status
-    STATUS=$(transmission-remote -l 2>/dev/null)
-
-    # Overall stats
-    STATS=$(transmission-remote -st 2>/dev/null)
-    DOWNLOAD_SPEED=$(echo "$STATS" | grep "Download Speed:" | awk '{print $3, $4}')
-    UPLOAD_SPEED=$(echo "$STATS" | grep "Upload Speed:" | awk '{print $3, $4}')
-
-    echo -e "${YELLOW}SPEEDS:${NC} ↓ $DOWNLOAD_SPEED  ↑ $UPLOAD_SPEED\n"
-
-    # Active torrents
-    echo -e "${GREEN}ACTIVE DOWNLOADS:${NC}"
-    echo "─────────────────────────────────────────────────────────────────"
-
-    ACTIVE_COUNT=0
-    while IFS= read -r line; do
-        if echo "$line" | grep -qE "Downloading|Up & Down|Seeding"; then
-            ID=$(echo "$line" | awk '{print $1}' | tr -d '*')
-
-            # Get detailed info for this torrent
-            INFO=$(transmission-remote -t "$ID" -i 2>/dev/null)
-
-            NAME=$(echo "$INFO" | grep "^ *Name:" | cut -d: -f2- | xargs)
-            PERCENT=$(echo "$INFO" | grep "^ *Percent Done:" | awk '{print $3}')
-            TOTAL_SIZE=$(echo "$INFO" | grep "^ *Total size:" | awk '{print $3, $4}')
-            DOWNLOADED=$(echo "$INFO" | grep "^ *Have:" | awk '{print $2, $3}')
-            ETA=$(echo "$INFO" | grep "^ *ETA:" | cut -d: -f2- | xargs)
-            DOWNLOAD_SPEED=$(echo "$INFO" | grep "^ *Download Speed:" | awk '{print $3, $4}')
-            PEERS=$(echo "$INFO" | grep "^ *Peers:" | awk '{print $2}')
-
-            # Truncate name if too long
-            if [ ${#NAME} -gt 45 ]; then
-                NAME="${NAME:0:42}..."
-            fi
-
-            # Display with more details
-            printf "${MAGENTA}ID:${NC} %-3s ${CYAN}%-45s${NC}\n" "$ID" "$NAME"
-            printf "      Progress: ${GREEN}%s${NC}  Downloaded: ${YELLOW}%s${NC} / ${YELLOW}%s${NC}\n" "$PERCENT" "$DOWNLOADED" "$TOTAL_SIZE"
-            printf "      Speed: ${BLUE}%s${NC}  ETA: ${CYAN}%s${NC}  Peers: ${GREEN}%s${NC}\n\n" "$DOWNLOAD_SPEED" "$ETA" "$PEERS"
-
-            ((ACTIVE_COUNT++))
+        # Truncate name if too long
+        if [ ${#name} -gt 45 ]; then
+            name="${name:0:42}..."
         fi
-    done <<< "$STATUS"
 
-    [ $ACTIVE_COUNT -eq 0 ] && echo -e "None\n"
-    
-    # Queued torrents
-    echo -e "${YELLOW}QUEUED:${NC}"
-    echo "─────────────────────────────────────────────────────────────────"
+        # Display with details
+        printf "${COLORS[MAGENTA]}ID:${COLORS[RESET]} %-3s ${COLORS[CYAN]}%-45s${COLORS[RESET]}\n" "$id" "$name"
+        printf "      Progress: ${COLORS[GREEN]}%s${COLORS[RESET]}  Downloaded: ${COLORS[YELLOW]}%s${COLORS[RESET]} / ${COLORS[YELLOW]}%s${COLORS[RESET]}\n" "$percent" "$downloaded" "$total_size"
+        printf "      Speed: ${COLORS[BLUE]}%s${COLORS[RESET]}  ETA: ${COLORS[CYAN]}%s${COLORS[RESET]}  Peers: ${COLORS[GREEN]}%s${COLORS[RESET]}\n\n" "$download_speed" "$eta" "$peers"
 
-    QUEUED_COUNT=0
-    while IFS= read -r line; do
-        if echo "$line" | grep -q "Stopped"; then
-            ID=$(echo "$line" | awk '{print $1}' | tr -d '*')
-            INFO=$(transmission-remote -t "$ID" -i 2>/dev/null)
-            NAME=$(echo "$INFO" | grep "^ *Name:" | cut -d: -f2- | xargs)
-            PERCENT=$(echo "$INFO" | grep "^ *Percent Done:" | awk '{print $3}')
-            TOTAL_SIZE=$(echo "$INFO" | grep "^ *Total size:" | awk '{print $3, $4}')
+        ((active_count++))
+    done < <(parse_torrent_list "active")
 
-            if [ ${#NAME} -gt 45 ]; then
-                NAME="${NAME:0:42}..."
-            fi
+    [ $active_count -eq 0 ] && echo -e "None\n"
+}
 
-            printf "${MAGENTA}ID:${NC} %-3s ${CYAN}%-45s${NC} [%s - %s]\n" "$ID" "$NAME" "$PERCENT" "$TOTAL_SIZE"
-            ((QUEUED_COUNT++))
+# Display queued torrents (Single Responsibility)
+display_queued_torrents() {
+    echo -e "${COLORS[YELLOW]}QUEUED:${COLORS[RESET]}"
+    print_separator "-" 65
+
+    local queued_count=0
+
+    while read -r id; do
+        local name=$(get_torrent_field "$id" "name")
+        local percent=$(get_torrent_field "$id" "percent")
+        local total_size=$(get_torrent_field "$id" "size")
+
+        if [ ${#name} -gt 45 ]; then
+            name="${name:0:42}..."
         fi
-    done <<< "$STATUS"
 
-    [ $QUEUED_COUNT -eq 0 ] && echo -e "None\n"
+        printf "${COLORS[MAGENTA]}ID:${COLORS[RESET]} %-3s ${COLORS[CYAN]}%-45s${COLORS[RESET]} [%s - %s]\n" "$id" "$name" "$percent" "$total_size"
+        ((queued_count++))
+    done < <(parse_torrent_list "stopped")
 
-    # Completed (from log)
-    echo -e "\n${GREEN}RECENTLY COMPLETED:${NC}"
-    echo "─────────────────────────────────────────────────────────────────"
+    [ $queued_count -eq 0 ] && echo -e "None\n"
+}
+
+# Display completed torrents (Single Responsibility)
+display_completed() {
+    echo -e "\n${COLORS[GREEN]}RECENTLY COMPLETED:${COLORS[RESET]}"
+    print_separator "-" 65
 
     if [ -f "$LOG_DIR/completed.log" ]; then
-        tail -n 5 "$LOG_DIR/completed.log" 2>/dev/null | while IFS= read -r line; do
-            echo "$line"
-        done
+        tail -n 5 "$LOG_DIR/completed.log" 2>/dev/null || echo "None"
     else
         echo "None"
     fi
+}
 
-    # Disk usage
-    echo -e "\n${BLUE}DISK USAGE:${NC}"
-    df -h "$DOWNLOAD_DIR" | tail -n 1 | awk '{printf "Used: %s/%s (%s) - Available: %s\n", $3, $2, $5, $4}'
+# Display disk usage (Single Responsibility)
+display_disk_usage() {
+    echo -e "\n${COLORS[BLUE]}DISK USAGE (Download Directory: $DOWNLOAD_DIR):${COLORS[RESET]}"
 
-    echo -e "\n${BLUE}═══════════════════════════════════════════════════════════════${NC}"
-    echo -e "Press ${CYAN}'d'${NC} for detailed view | ${CYAN}'q' or Ctrl+C${NC} to exit | Auto-refresh in 5s..."
-
-    # Check for user input (non-blocking with 5 second timeout)
-    read -t 5 -n 1 key 2>/dev/null
-    response=$?
-
-    # Only process if a key was actually pressed (exit status 0)
-    if [ $response -eq 0 ]; then
-        case "$key" in
-            q|Q)
-                cleanup
-                ;;
-            d|D)
-                echo ""
-                read -p "Enter torrent ID for details: " detail_id
-                if [ -n "$detail_id" ]; then
-                    show_detailed_info "$detail_id"
-                fi
-                ;;
-            *)
-                # Clear any other input
-                read -t 0.1 -n 10000 discard 2>/dev/null || true
-                ;;
-        esac
+    if [ -d "$DOWNLOAD_DIR" ]; then
+        df -h "$DOWNLOAD_DIR" 2>/dev/null | tail -n 1 | awk '{printf "Used: %s/%s (%s) - Available: %s\n", $3, $2, $5, $4}'
+    else
+        print_warning "Download directory not found: $DOWNLOAD_DIR"
     fi
-done
+}
+
+# Main monitoring function
+main() {
+    clear
+
+    print_separator "=" 65
+    echo -e "${COLORS[GREEN]}         TORRENT DOWNLOAD MONITOR${COLORS[RESET]}"
+    print_separator "=" 65
+
+    # Check if transmission-daemon is running
+    if ! is_transmission_running; then
+        print_error "Transmission-daemon is not running!"
+        echo "Start it with: ./bin/start_torrents.sh"
+        exit 1
+    fi
+
+    while true; do
+        clear
+
+        print_separator "=" 65
+        echo -e "${COLORS[GREEN]}         TORRENT DOWNLOAD MONITOR - $(date '+%H:%M:%S')${COLORS[RESET]}"
+        print_separator "=" 65
+        echo ""
+
+        # Get and display speeds
+        local download_speed=$(get_download_speed)
+        local upload_speed=$(get_upload_speed)
+        echo -e "${COLORS[YELLOW]}SPEEDS:${COLORS[RESET]} ↓ $download_speed  ↑ $upload_speed\n"
+
+        # Display sections
+        display_active_torrents
+        display_queued_torrents
+        display_completed
+        display_disk_usage
+
+        echo ""
+        print_separator "=" 65
+        echo -e "Press ${COLORS[CYAN]}'d'${COLORS[RESET]} for detailed view | ${COLORS[CYAN]}'q' or Ctrl+C${COLORS[RESET]} to exit | Auto-refresh in 5s..."
+
+        # Check for user input (non-blocking with 5 second timeout)
+        read -t 5 -n 1 key 2>/dev/null
+        local response=$?
+
+        # Only process if a key was actually pressed (exit status 0)
+        if [ $response -eq 0 ]; then
+            case "$key" in
+                q|Q)
+                    cleanup
+                    ;;
+                d|D)
+                    echo ""
+                    read -p "Enter torrent ID for details: " detail_id
+                    if [ -n "$detail_id" ]; then
+                        show_detailed_info "$detail_id"
+                    fi
+                    ;;
+                *)
+                    # Clear any other input
+                    read -t 0.1 -n 10000 discard 2>/dev/null || true
+                    ;;
+            esac
+        fi
+    done
+}
+
+# Run main
+main

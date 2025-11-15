@@ -1,145 +1,172 @@
 #!/bin/bash
 
-# Get script directory and project root
+# Torrent Manager - Main Background Service
+# Refactored with SOLID and DRY principles
+
+set -e
+
+# Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Configuration
-TORRENT_DIR="$PROJECT_ROOT/torrents"
-DOWNLOAD_DIR="$PROJECT_ROOT/downloads"
-LOG_DIR="$PROJECT_ROOT/logs"
-TORRENT_LIST="$PROJECT_ROOT/data/torrent_list.txt"
-MAIN_LOG="$LOG_DIR/torrent_manager.log"
-PID_FILE="/tmp/torrent_manager.pid"
+# Source libraries (Dependency Inversion Principle)
+source "$SCRIPT_DIR/config.sh"
+source "$SCRIPT_DIR/utils.sh"
+source "$SCRIPT_DIR/transmission_api.sh"
 
-# Create directories
-mkdir -p "$TORRENT_DIR" "$DOWNLOAD_DIR" "$LOG_DIR"
+# Constants
+readonly PID_FILE="/tmp/torrent_manager.pid"
+readonly MAIN_LOG="$LOG_DIR/torrent_manager.log"
 
-# Logging function
+# Ensure directories exist
+ensure_directories
+
+# Logging wrapper (DRY)
 log_message() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$MAIN_LOG"
+    log_info "$1" "$MAIN_LOG"
 }
 
-# Check if already running
-if [ -f "$PID_FILE" ]; then
-    OLD_PID=$(cat "$PID_FILE")
-    if ps -p "$OLD_PID" > /dev/null 2>&1; then
-        log_message "ERROR: Torrent manager already running with PID $OLD_PID"
-        exit 1
-    else
-        rm -f "$PID_FILE"
+# Check if already running (Single Responsibility)
+check_already_running() {
+    if [ -f "$PID_FILE" ]; then
+        local old_pid=$(cat "$PID_FILE")
+        if ps -p "$old_pid" > /dev/null 2>&1; then
+            log_error "Torrent manager already running with PID $old_pid" "$MAIN_LOG"
+            exit 1
+        else
+            rm -f "$PID_FILE"
+        fi
     fi
-fi
+}
 
-# Save PID
-echo $$ > "$PID_FILE"
+# Cleanup on exit
+cleanup() {
+    rm -f "$PID_FILE"
+    log_message "Torrent manager stopped"
+}
 
-# Trap to cleanup on exit
-trap 'rm -f "$PID_FILE"; log_message "Torrent manager stopped"' EXIT
+# Process torrents from list file (Single Responsibility)
+process_torrent_list() {
+    if [ ! -f "$TORRENT_LIST" ]; then
+        return 0
+    fi
 
-log_message "Starting torrent manager..."
+    log_message "Processing torrents from list: $TORRENT_LIST"
 
-# Stop any existing transmission-daemon
-transmission-daemon --stop 2>/dev/null
-sleep 2
-
-# Start transmission-daemon with configuration
-transmission-daemon \
-    --download-dir "$DOWNLOAD_DIR" \
-    --incomplete-dir "$DOWNLOAD_DIR/.incomplete" \
-    --logfile "$LOG_DIR/transmission.log" \
-    --log-level=2 \
-    --encryption-preferred \
-    --peer-limit-global=200 \
-    --peer-limit-per-torrent=50 \
-    --download-queue-size=10 \
-    --seed-queue-size=10 \
-    --no-auth \
-    --allowed "127.0.0.1" \
-    --port 9091
-
-sleep 3
-
-# Check if daemon started
-if ! transmission-remote -l &>/dev/null; then
-    log_message "ERROR: Failed to start transmission-daemon"
-    exit 1
-fi
-
-log_message "Transmission-daemon started successfully"
-
-# Add torrents from list or directory
-if [ -f "$TORRENT_LIST" ]; then
-    log_message "Adding torrents from list..."
     while IFS= read -r torrent; do
+        # Skip empty lines and comments
         [ -z "$torrent" ] || [[ "$torrent" =~ ^# ]] && continue
 
+        # Add torrent based on type
         if [[ "$torrent" =~ ^magnet: ]] || [[ "$torrent" =~ ^http ]]; then
-            transmission-remote -a "$torrent" &>/dev/null
-            if [ $? -eq 0 ]; then
-                log_message "Added: $torrent"
+            if add_torrent "$torrent" "$DOWNLOAD_DIR" &>/dev/null; then
+                log_success "Added: $torrent" "$MAIN_LOG"
             else
-                log_message "Failed to add: $torrent"
+                log_error "Failed to add: $torrent" "$MAIN_LOG"
             fi
         elif [ -f "$torrent" ]; then
-            transmission-remote -a "$torrent" &>/dev/null
-            if [ $? -eq 0 ]; then
-                log_message "Added file: $torrent"
+            if add_torrent "$torrent" "$DOWNLOAD_DIR" &>/dev/null; then
+                log_success "Added file: $torrent" "$MAIN_LOG"
             else
-                log_message "Failed to add file: $torrent"
+                log_error "Failed to add file: $torrent" "$MAIN_LOG"
             fi
         fi
     done < "$TORRENT_LIST"
-fi
+}
 
-# Add any .torrent files from torrent directory
-for torrent_file in "$TORRENT_DIR"/*.torrent; do
-    [ -f "$torrent_file" ] || continue
-    transmission-remote -a "$torrent_file" &>/dev/null
-    if [ $? -eq 0 ]; then
-        log_message "Added torrent file: $(basename "$torrent_file")"
-        mv "$torrent_file" "$TORRENT_DIR/added/"
-    fi
-done
+# Process torrent files from directory (Single Responsibility)
+process_torrent_files() {
+    local torrent_file
 
-# Start all torrents
-transmission-remote -t all -s
-log_message "Started all torrents"
+    for torrent_file in "$TORRENT_DIR"/*.torrent; do
+        [ -f "$torrent_file" ] || continue
 
-# Monitor loop
-while true; do
-    # Get status
-    STATUS=$(transmission-remote -l 2>/dev/null)
-
-    if [ $? -ne 0 ]; then
-        log_message "WARNING: Cannot connect to transmission-daemon"
-        sleep 30
-        continue
-    fi
-
-    # Parse active downloads
-    ACTIVE=$(echo "$STATUS" | grep -E "Downloading|Seeding" | wc -l)
-    TOTAL=$(echo "$STATUS" | tail -n 1 | awk '{print $1}')
-
-    # Log summary every 5 minutes
-    log_message "Status: Active: $ACTIVE | Total in queue: $TOTAL"
-
-    # Detailed status to separate file
-    echo "$STATUS" > "$LOG_DIR/current_status.txt"
-
-    # Check completed
-    while IFS= read -r line; do
-        if echo "$line" | grep -q "100%.*Seeding"; then
-            ID=$(echo "$line" | awk '{print $1}' | tr -d '*')
-            NAME=$(transmission-remote -t "$ID" -i | grep "Name:" | cut -d: -f2- | xargs)
-            if [ -n "$NAME" ]; then
-                echo "[$(date '+%Y-%m-%d %H:%M:%S')] COMPLETED: $NAME" >> "$LOG_DIR/completed.log"
-                # Remove torrent but keep the downloaded files
-                transmission-remote -t "$ID" -r &>/dev/null
-                log_message "Removed completed torrent (files kept): $NAME"
-            fi
+        if add_torrent "$torrent_file" "$DOWNLOAD_DIR" &>/dev/null; then
+            log_success "Added torrent file: $(basename "$torrent_file")" "$MAIN_LOG"
+            mv "$torrent_file" "$TORRENT_DIR/added/"
+        else
+            log_error "Failed to add: $(basename "$torrent_file")" "$MAIN_LOG"
         fi
-    done <<< "$STATUS"
+    done
+}
 
-    sleep 300  # Check every 5 minutes
-done
+# Monitor and manage torrents (Single Responsibility)
+monitor_torrents() {
+    local completed_log="$LOG_DIR/completed.log"
+    local status_file="$LOG_DIR/current_status.txt"
+
+    while true; do
+        # Check if transmission is still running
+        if ! is_transmission_running; then
+            log_warning "Cannot connect to transmission-daemon" "$MAIN_LOG"
+            sleep 30
+            continue
+        fi
+
+        # Get current status
+        local status=$(get_torrent_list)
+        local active=$(get_active_count)
+        local total=$(get_total_count)
+
+        # Log summary
+        log_message "Status: Active: $active | Total in queue: $total"
+
+        # Save detailed status
+        echo "$status" > "$status_file"
+
+        # Process completed torrents
+        while read -r id; do
+            local name=$(get_torrent_field "$id" "name")
+
+            if [ -n "$name" ]; then
+                log_success "COMPLETED: $name" "$completed_log"
+                log_message "Removing completed torrent (files kept): $name"
+
+                # Remove torrent but keep files
+                remove_torrent "$id"
+            fi
+        done < <(get_completed_torrents)
+
+        # Sleep for 5 minutes before next check
+        sleep 300
+    done
+}
+
+# Main function (orchestrates the flow)
+main() {
+    # Setup
+    trap cleanup EXIT INT TERM
+
+    # Check if already running
+    check_already_running
+
+    # Save PID
+    echo $$ > "$PID_FILE"
+
+    log_message "Starting torrent manager..."
+    log_message "Download directory: $DOWNLOAD_DIR"
+    log_message "Torrent directory: $TORRENT_DIR"
+
+    # Start transmission-daemon
+    if start_transmission "$DOWNLOAD_DIR" "$DOWNLOAD_DIR/.incomplete" "$LOG_DIR/transmission.log"; then
+        log_success "Transmission-daemon started successfully" "$MAIN_LOG"
+    else
+        log_error "Failed to start transmission-daemon" "$MAIN_LOG"
+        exit 1
+    fi
+
+    # Process torrents from list
+    process_torrent_list
+
+    # Process torrent files
+    process_torrent_files
+
+    # Start all torrents
+    start_torrent "all"
+    log_message "Started all torrents"
+
+    # Enter monitoring loop
+    monitor_torrents
+}
+
+# Run main
+main

@@ -1,36 +1,16 @@
 #!/bin/bash
 
 # Full-Screen Responsive Terminal Dashboard
-# A clever, adaptive UI that spans entire terminal and responds to resize events
+# Refactored with SOLID and DRY principles
 
 # Path configuration
 UI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$UI_DIR/.." && pwd)"
 
-# Colors and styles
-declare -A COLORS=(
-    [RESET]='\033[0m'
-    [BOLD]='\033[1m'
-    [DIM]='\033[2m'
-    [RED]='\033[31m'
-    [GREEN]='\033[32m'
-    [YELLOW]='\033[33m'
-    [BLUE]='\033[34m'
-    [MAGENTA]='\033[35m'
-    [CYAN]='\033[36m'
-    [WHITE]='\033[37m'
-    [BG_BLACK]='\033[40m'
-    [BG_BLUE]='\033[44m'
-    [BG_CYAN]='\033[46m'
-)
-
-# Terminal control
-CLEAR_SCREEN='\033[2J'
-CURSOR_HOME='\033[H'
-HIDE_CURSOR='\033[?25l'
-SHOW_CURSOR='\033[?25h'
-SAVE_CURSOR='\033[s'
-RESTORE_CURSOR='\033[u'
+# Source libraries
+source "$PROJECT_ROOT/lib/config.sh"
+source "$PROJECT_ROOT/lib/utils.sh"
+source "$PROJECT_ROOT/lib/transmission_api.sh"
 
 # Global variables
 TERM_WIDTH=0
@@ -44,13 +24,6 @@ LAST_REFRESH=0
 get_terminal_size() {
     TERM_HEIGHT=$(tput lines)
     TERM_WIDTH=$(tput cols)
-}
-
-# Draw horizontal line
-draw_line() {
-    local char="${1:--}"
-    local width="${2:-$TERM_WIDTH}"
-    printf "%${width}s" | tr ' ' "$char"
 }
 
 # Draw box with title
@@ -91,7 +64,6 @@ draw_box() {
 
 # Draw header
 draw_header() {
-    local header_height=3
     tput cup 0 0
 
     # Title bar
@@ -108,7 +80,10 @@ draw_header() {
     # Subtitle
     tput cup 1 0
     echo -ne "${COLORS[CYAN]}${COLORS[DIM]}"
-    local subtitle="Real-time Monitoring - Responsive Design - Terminal Width: ${TERM_WIDTH} x Height: ${TERM_HEIGHT}"
+    local subtitle="Real-time Monitoring - Terminal: ${TERM_WIDTH}x${TERM_HEIGHT} - Download: ${DOWNLOAD_DIR}"
+    if [ ${#subtitle} -gt $TERM_WIDTH ]; then
+        subtitle="Real-time Monitoring - Terminal: ${TERM_WIDTH}x${TERM_HEIGHT}"
+    fi
     local subtitle_pos=$(( (TERM_WIDTH - ${#subtitle}) / 2 ))
     tput cup 1 $subtitle_pos
     echo -n "$subtitle"
@@ -136,7 +111,10 @@ draw_footer() {
     echo -ne "${COLORS[BG_BLACK]}${COLORS[CYAN]}"
     printf "%${TERM_WIDTH}s" " "
 
-    local footer_text="Press 'q' to quit - 'r' to refresh - 's' to start torrents - 't' to stop torrents"
+    local footer_text="[Q]uit | [R]efresh | [S]tart All | [T]Stop All | [P]Pause | [U]Resume"
+    if [ ${#footer_text} -gt $TERM_WIDTH ]; then
+        footer_text="[Q]uit | [R]efresh | [S]tart | [T]Stop"
+    fi
     local footer_pos=$(( (TERM_WIDTH - ${#footer_text}) / 2 ))
     tput cup $footer_y $footer_pos
     echo -n "$footer_text"
@@ -144,8 +122,16 @@ draw_footer() {
     # Status bar
     tput cup $((footer_y + 1)) 0
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -ne "${COLORS[GREEN]}"
-    echo -n "> Status: RUNNING"
+
+    # Show transmission status
+    if is_transmission_running; then
+        echo -ne "${COLORS[GREEN]}"
+        echo -n "> Status: RUNNING"
+    else
+        echo -ne "${COLORS[RED]}"
+        echo -n "> Status: STOPPED"
+    fi
+
     tput cup $((footer_y + 1)) $((TERM_WIDTH - ${#timestamp} - 1))
     echo -n "$timestamp"
     echo -ne "${COLORS[RESET]}"
@@ -153,15 +139,11 @@ draw_footer() {
 
 # Get torrent stats
 get_torrent_stats() {
-    local stats_file="/tmp/torrent_stats.txt"
-
-    if command -v transmission-remote &> /dev/null; then
-        transmission-remote -l 2>/dev/null > "$stats_file" || echo "Transmission not running" > "$stats_file"
+    if is_transmission_running; then
+        get_torrent_list
     else
-        echo "Transmission not installed" > "$stats_file"
+        echo "Transmission daemon not running"
     fi
-
-    cat "$stats_file"
 }
 
 # Draw torrent list
@@ -187,9 +169,9 @@ draw_torrent_section() {
         tput cup $((content_y + line_num)) $content_x
 
         # Colorize based on status
-        if [[ "$line" =~ "Done" ]] || [[ "$line" =~ "100%" ]]; then
+        if [[ "$line" =~ "100%" ]] || [[ "$line" =~ "Seeding" ]]; then
             echo -ne "${COLORS[GREEN]}"
-        elif [[ "$line" =~ "Downloading" ]] || [[ "$line" =~ "%" ]]; then
+        elif [[ "$line" =~ "Downloading" ]] || [[ "$line" =~ "Up & Down" ]]; then
             echo -ne "${COLORS[YELLOW]}"
         elif [[ "$line" =~ "Stopped" ]] || [[ "$line" =~ "Idle" ]]; then
             echo -ne "${COLORS[RED]}"
@@ -224,11 +206,16 @@ draw_stats_section() {
     # Download stats
     draw_box "DOWNLOADS" $stats_y 1 $col_width $stats_height
     tput cup $((stats_y + 1)) 3
-    local dl_count=$(find "$PROJECT_ROOT/downloads" -type f 2>/dev/null | wc -l)
-    echo -ne "${COLORS[GREEN]}Files: $dl_count${COLORS[RESET]}"
-    tput cup $((stats_y + 2)) 3
-    local dl_size=$(du -sh "$PROJECT_ROOT/downloads" 2>/dev/null | cut -f1)
-    echo -ne "${COLORS[CYAN]}Size: ${dl_size:-0}${COLORS[RESET]}"
+
+    if [ -d "$DOWNLOAD_DIR" ]; then
+        local dl_count=$(find "$DOWNLOAD_DIR" -type f 2>/dev/null | wc -l)
+        echo -ne "${COLORS[GREEN]}Files: $dl_count${COLORS[RESET]}"
+        tput cup $((stats_y + 2)) 3
+        local dl_size=$(du -sh "$DOWNLOAD_DIR" 2>/dev/null | cut -f1)
+        echo -ne "${COLORS[CYAN]}Size: ${dl_size:-0}${COLORS[RESET]}"
+    else
+        echo -ne "${COLORS[RED]}Dir not found${COLORS[RESET]}"
+    fi
 
     # System stats
     draw_box "SYSTEM" $stats_y $((col_width + 1)) $col_width $stats_height
@@ -236,23 +223,22 @@ draw_stats_section() {
     local cpu_load=$(uptime | awk -F'load average:' '{ print $2 }' | cut -d, -f1 | xargs)
     echo -ne "${COLORS[YELLOW]}Load: $cpu_load${COLORS[RESET]}"
     tput cup $((stats_y + 2)) $((col_width + 3))
-    local mem_usage=$(free -h | awk '/^Mem:/ {print $3 "/" $2}')
+    local mem_usage=$(free -h 2>/dev/null | awk '/^Mem:/ {print $3 "/" $2}')
     echo -ne "${COLORS[MAGENTA]}RAM: $mem_usage${COLORS[RESET]}"
 
-    # Network stats
-    draw_box "NETWORK" $stats_y $((col_width * 2 + 1)) $((TERM_WIDTH - col_width * 2 - 2)) $stats_height
+    # Network/Torrent stats
+    draw_box "TORRENT STATUS" $stats_y $((col_width * 2 + 1)) $((TERM_WIDTH - col_width * 2 - 2)) $stats_height
     tput cup $((stats_y + 1)) $((col_width * 2 + 3))
-    local active_conn=$(netstat -an 2>/dev/null | grep ESTABLISHED | wc -l)
-    echo -ne "${COLORS[BLUE]}Connections: $active_conn${COLORS[RESET]}"
-    tput cup $((stats_y + 2)) $((col_width * 2 + 3))
-    echo -ne "${COLORS[GREEN]}Status: [ONLINE]${COLORS[RESET]}"
-}
 
-# Draw fancy loading animation
-draw_loading() {
-    local frames=("|" "/" "-" "\\")
-    local frame=${frames[$((RANDOM % ${#frames[@]}))]}
-    echo -ne "${COLORS[CYAN]}$frame${COLORS[RESET]}"
+    if is_transmission_running; then
+        local active=$(get_active_count 2>/dev/null || echo "0")
+        echo -ne "${COLORS[GREEN]}Active: $active${COLORS[RESET]}"
+        tput cup $((stats_y + 2)) $((col_width * 2 + 3))
+        local total=$(get_total_count 2>/dev/null || echo "0")
+        echo -ne "${COLORS[BLUE]}Total: $total${COLORS[RESET]}"
+    else
+        echo -ne "${COLORS[RED]}Daemon: OFF${COLORS[RESET]}"
+    fi
 }
 
 # Main draw function
@@ -274,14 +260,12 @@ draw_screen() {
     draw_stats_section
     draw_footer
 
-    # Reset cursor (keep it hidden during updates)
-    echo -ne "$SHOW_CURSOR"
+    # Keep cursor hidden during updates
 }
 
 # Handle terminal resize
 handle_resize() {
     NEED_REDRAW=1
-    # Clear screen on resize to handle new dimensions
     FIRST_DRAW=1
 }
 
@@ -294,7 +278,7 @@ cleanup() {
     exit 0
 }
 
-# Handle user input
+# Handle user input (FIXED: Now properly starts/stops torrents)
 handle_input() {
     local key
     read -rsn1 -t 0.1 key
@@ -307,11 +291,31 @@ handle_input() {
             NEED_REDRAW=1
             ;;
         s|S)
-            "$PROJECT_ROOT/bin/start_torrents.sh" &>/dev/null &
+            # Start torrent manager
+            if ! pgrep -f "torrent_manager.sh" > /dev/null; then
+                nohup "$PROJECT_ROOT/lib/torrent_manager.sh" > "$LOG_DIR/nohup.log" 2>&1 &
+            fi
             NEED_REDRAW=1
             ;;
         t|T)
-            "$PROJECT_ROOT/bin/stop_torrents.sh" &>/dev/null &
+            # Stop all torrents
+            if is_transmission_running; then
+                stop_torrent "all"
+            fi
+            NEED_REDRAW=1
+            ;;
+        p|P)
+            # Pause all torrents
+            if is_transmission_running; then
+                stop_torrent "all"
+            fi
+            NEED_REDRAW=1
+            ;;
+        u|U)
+            # Resume all torrents
+            if is_transmission_running; then
+                start_torrent "all"
+            fi
             NEED_REDRAW=1
             ;;
     esac

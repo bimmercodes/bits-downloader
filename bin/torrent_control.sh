@@ -1,24 +1,31 @@
 #!/bin/bash
 
-# Color codes
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+# Torrent Control Panel - Interactive torrent management
+# Refactored with SOLID and DRY principles
+
+# Get script directory and project root
+BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$BIN_DIR/.." && pwd)"
+
+# Source libraries
+source "$PROJECT_ROOT/lib/config.sh"
+source "$PROJECT_ROOT/lib/utils.sh"
+source "$PROJECT_ROOT/lib/transmission_api.sh"
 
 # Cleanup function
 cleanup() {
-    echo -e "\n${GREEN}Exiting control panel...${NC}"
+    echo -e "\n${COLORS[GREEN]}Exiting control panel...${COLORS[RESET]}"
     exit 0
 }
 
 # Trap for clean exit
 trap cleanup INT TERM
 
+# Show menu (Single Responsibility)
 show_menu() {
-    echo -e "${GREEN}═══════════════════════════════════════════${NC}"
-    echo -e "${GREEN}     TORRENT CONTROL PANEL${NC}"
-    echo -e "${GREEN}═══════════════════════════════════════════${NC}"
+    print_separator "=" 45
+    echo -e "${COLORS[GREEN]}     TORRENT CONTROL PANEL${COLORS[RESET]}"
+    print_separator "=" 45
     echo "1) Add torrent (magnet/URL/file)"
     echo "2) Pause torrent"
     echo "3) Resume torrent"
@@ -29,146 +36,204 @@ show_menu() {
     echo "8) Set upload speed limit"
     echo "9) Show detailed info"
     echo "0) Exit"
-    echo -e "${GREEN}═══════════════════════════════════════════${NC}"
+    print_separator "=" 45
 }
 
-# Check if transmission is running
-if ! transmission-remote -l &>/dev/null; then
-    echo -e "${RED}ERROR: Transmission-daemon is not running!${NC}"
-    echo "Start it with: ./start_torrents.sh"
-    exit 1
-fi
+# Add torrent handler (Single Responsibility)
+handle_add_torrent() {
+    read -p "Enter magnet link, URL, or file path: " torrent
 
-# Clear screen before starting
-clear
+    if [ -z "$torrent" ]; then
+        print_warning "No torrent specified"
+        return
+    fi
 
-while true; do
-    show_menu
-    read -p "Select option: " choice
+    if add_torrent "$torrent" "$DOWNLOAD_DIR"; then
+        print_success "Torrent added successfully"
+    else
+        print_error "Failed to add torrent"
+    fi
+}
+
+# Pause torrent handler (Single Responsibility)
+handle_pause_torrent() {
+    get_torrent_list
     echo ""
-    
-    case $choice in
-        1)
-            read -p "Enter magnet link, URL, or file path: " torrent
-            transmission-remote -a "$torrent"
-            [ $? -eq 0 ] && echo -e "${GREEN}Torrent added successfully${NC}" || echo -e "${RED}Failed to add torrent${NC}"
-            ;;
-        2)
-            transmission-remote -l
-            echo ""
-            read -p "Enter torrent ID to pause: " id
-            if [ -n "$id" ]; then
-                transmission-remote -t "$id" -S
-                [ $? -eq 0 ] && echo -e "${GREEN}✓ Torrent $id paused${NC}" || echo -e "${RED}✗ Failed to pause torrent${NC}"
-            else
-                echo -e "${YELLOW}No ID entered${NC}"
-            fi
-            ;;
-        3)
-            transmission-remote -l
-            echo ""
-            read -p "Enter torrent ID to resume: " id
-            if [ -n "$id" ]; then
-                transmission-remote -t "$id" -s
-                [ $? -eq 0 ] && echo -e "${GREEN}✓ Torrent $id resumed${NC}" || echo -e "${RED}✗ Failed to resume torrent${NC}"
-            else
-                echo -e "${YELLOW}No ID entered${NC}"
-            fi
-            ;;
-        4)
-            transmission-remote -l
-            echo ""
-            read -p "Enter torrent ID to remove: " id
-            read -p "Delete files too? (y/n): " delete
-            if [ "$delete" = "y" ]; then
-                # Get file location before removing
-                DOWNLOAD_DIR=$(transmission-remote -si | grep "Download directory" | cut -d: -f2- | xargs)
-                FILE_INFO=$(transmission-remote -t "$id" -i 2>/dev/null)
-                FILE_NAME=$(echo "$FILE_INFO" | grep "^ *Name:" | cut -d: -f2- | xargs)
-                FILE_LOCATION=$(echo "$FILE_INFO" | grep "^ *Location:" | cut -d: -f2- | xargs)
+    read -p "Enter torrent ID to pause: " id
 
-                # Try transmission's built-in deletion first
-                echo "Removing torrent and attempting to delete files..."
-                transmission-remote -t "$id" --remove-and-delete
+    if [ -z "$id" ]; then
+        print_warning "No ID entered"
+        return
+    fi
 
-                # Wait a moment for transmission to process
-                sleep 1
+    if stop_torrent "$id"; then
+        print_success "Torrent $id paused"
+    else
+        print_error "Failed to pause torrent"
+    fi
+}
 
-                # Check if files still exist and delete manually if needed
-                if [ -n "$FILE_LOCATION" ] && [ -n "$FILE_NAME" ]; then
-                    FULL_PATH="$FILE_LOCATION/$FILE_NAME"
-                    if [ -e "$FULL_PATH" ]; then
-                        echo "Transmission couldn't delete files. Deleting manually..."
-                        rm -rf "$FULL_PATH"
-                        if [ $? -eq 0 ]; then
-                            echo -e "${GREEN}Files deleted successfully${NC}"
-                        else
-                            echo -e "${RED}Failed to delete files at: $FULL_PATH${NC}"
-                            echo "You may need to delete manually with: rm -rf \"$FULL_PATH\""
-                        fi
-                    else
-                        echo -e "${GREEN}Torrent and files removed successfully${NC}"
-                    fi
-                fi
-            else
-                transmission-remote -t "$id" -r
-                echo -e "${GREEN}Torrent removed (files kept)${NC}"
-            fi
-            ;;
-        5)
-            transmission-remote -t all -S
-            if [ $? -eq 0 ]; then
-                echo -e "${GREEN}✓ All torrents paused${NC}"
-            else
-                echo -e "${RED}✗ Failed to pause torrents${NC}"
-            fi
-            ;;
-        6)
-            transmission-remote -t all -s
-            if [ $? -eq 0 ]; then
-                echo -e "${GREEN}✓ All torrents resumed${NC}"
-            else
-                echo -e "${RED}✗ Failed to resume torrents${NC}"
-            fi
-            ;;
-        7)
-            read -p "Enter download speed limit (KB/s, 0 for unlimited): " speed
-            if [ -n "$speed" ]; then
-                transmission-remote -d "$speed"
-                [ $? -eq 0 ] && echo -e "${GREEN}✓ Download speed limit set to $speed KB/s${NC}" || echo -e "${RED}✗ Failed to set speed limit${NC}"
-            else
-                echo -e "${YELLOW}No speed entered${NC}"
-            fi
-            ;;
-        8)
-            read -p "Enter upload speed limit (KB/s, 0 for unlimited): " speed
-            if [ -n "$speed" ]; then
-                transmission-remote -u "$speed"
-                [ $? -eq 0 ] && echo -e "${GREEN}✓ Upload speed limit set to $speed KB/s${NC}" || echo -e "${RED}✗ Failed to set speed limit${NC}"
-            else
-                echo -e "${YELLOW}No speed entered${NC}"
-            fi
-            ;;
-        9)
-            transmission-remote -l
-            echo ""
-            read -p "Enter torrent ID for details (or press Enter to skip): " id
-            if [ -n "$id" ]; then
-                echo ""
-                transmission-remote -t "$id" -i
-            fi
-            ;;
-        0)
-            echo "Exiting..."
-            exit 0
-            ;;
-        *)
-            echo -e "${RED}Invalid option${NC}"
-            sleep 1
-            ;;
-    esac
-    
+# Resume torrent handler (Single Responsibility)
+handle_resume_torrent() {
+    get_torrent_list
     echo ""
-    read -p "Press Enter to continue..."
+    read -p "Enter torrent ID to resume: " id
+
+    if [ -z "$id" ]; then
+        print_warning "No ID entered"
+        return
+    fi
+
+    if start_torrent "$id"; then
+        print_success "Torrent $id resumed"
+    else
+        print_error "Failed to resume torrent"
+    fi
+}
+
+# Remove torrent handler (Single Responsibility)
+handle_remove_torrent() {
+    get_torrent_list
+    echo ""
+    read -p "Enter torrent ID to remove: " id
+
+    if [ -z "$id" ]; then
+        print_warning "No ID entered"
+        return
+    fi
+
+    read -p "Delete files too? (y/n): " delete
+
+    if [ "$delete" = "y" ] || [ "$delete" = "Y" ]; then
+        # Get file info before removing
+        local name=$(get_torrent_field "$id" "name")
+
+        if remove_torrent_with_files "$id"; then
+            print_success "Torrent and files removed: $name"
+        else
+            print_error "Failed to remove torrent"
+        fi
+    else
+        if remove_torrent "$id"; then
+            print_success "Torrent removed (files kept)"
+        else
+            print_error "Failed to remove torrent"
+        fi
+    fi
+}
+
+# Set download speed handler (Single Responsibility)
+handle_download_speed() {
+    read -p "Enter download speed limit (KB/s, 0 for unlimited): " speed
+
+    if [ -z "$speed" ]; then
+        print_warning "No speed entered"
+        return
+    fi
+
+    if set_download_speed "$speed"; then
+        print_success "Download speed limit set to $speed KB/s"
+    else
+        print_error "Failed to set speed limit"
+    fi
+}
+
+# Set upload speed handler (Single Responsibility)
+handle_upload_speed() {
+    read -p "Enter upload speed limit (KB/s, 0 for unlimited): " speed
+
+    if [ -z "$speed" ]; then
+        print_warning "No speed entered"
+        return
+    fi
+
+    if set_upload_speed "$speed"; then
+        print_success "Upload speed limit set to $speed KB/s"
+    else
+        print_error "Failed to set speed limit"
+    fi
+}
+
+# Show detailed info handler (Single Responsibility)
+handle_detailed_info() {
+    get_torrent_list
+    echo ""
+    read -p "Enter torrent ID for details (or press Enter to skip): " id
+
+    if [ -n "$id" ]; then
+        echo ""
+        get_torrent_info "$id"
+    fi
+}
+
+# Main function
+main() {
+    # Check if transmission is running
+    if ! is_transmission_running; then
+        print_error "Transmission-daemon is not running!"
+        echo "Start it with: ./bin/start_torrents.sh"
+        exit 1
+    fi
+
+    # Clear screen before starting
     clear
-done
+
+    while true; do
+        show_menu
+        read -p "$(echo -e ${COLORS[WHITE]}Select option:${COLORS[RESET]} )" choice
+        echo ""
+
+        case $choice in
+            1)
+                handle_add_torrent
+                ;;
+            2)
+                handle_pause_torrent
+                ;;
+            3)
+                handle_resume_torrent
+                ;;
+            4)
+                handle_remove_torrent
+                ;;
+            5)
+                if stop_torrent "all"; then
+                    print_success "All torrents paused"
+                else
+                    print_error "Failed to pause torrents"
+                fi
+                ;;
+            6)
+                if start_torrent "all"; then
+                    print_success "All torrents resumed"
+                else
+                    print_error "Failed to resume torrents"
+                fi
+                ;;
+            7)
+                handle_download_speed
+                ;;
+            8)
+                handle_upload_speed
+                ;;
+            9)
+                handle_detailed_info
+                ;;
+            0)
+                echo "Exiting..."
+                exit 0
+                ;;
+            *)
+                print_error "Invalid option"
+                sleep 1
+                ;;
+        esac
+
+        echo ""
+        read -p "Press Enter to continue..."
+        clear
+    done
+}
+
+# Run main
+main

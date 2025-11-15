@@ -21,7 +21,10 @@
       "Bash(chmod:*)",
       "Bash(tree:*)",
       "Bash(bash:*)",
-      "Bash(bash -n:*)"
+      "Bash(bash -n:*)",
+      "Bash(/data/bimmercodes/bits-downloader/bin/start_torrents.sh:*)",
+      "Bash(/data/bimmercodes/bits-downloader/bin/stop_torrents.sh:*)",
+      "Bash(timeout 2 ./bin/monitor_torrents.sh:*)"
     ],
     "deny": [],
     "ask": []

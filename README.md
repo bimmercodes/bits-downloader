@@ -19,6 +19,8 @@
 - 📝 **Comprehensive Logging** - Detailed logs for all operations
 - 🌈 **Responsive Design** - Terminal UI adapts to any screen size
 - ⚡ **Fast & Efficient** - Powered by transmission-daemon
+- 🏗️ **Clean Architecture** - Built with SOLID and DRY principles
+- 🔧 **Easy Configuration** - Customizable download directories and settings
 
 ---
 
@@ -165,9 +167,11 @@ bits-downloader/
 │   ├── stop_torrents.sh          # Stop torrent manager
 │   ├── monitor_torrents.sh       # Real-time monitor
 │   └── torrent_control.sh        # Control panel
-├── lib/                          # Library scripts
-│   ├── torrent_manager.sh        # Core torrent manager
-│   └── install_torrents_manager.sh
+├── lib/                          # Shared libraries (SOLID & DRY)
+│   ├── config.sh                 # Configuration loader
+│   ├── utils.sh                  # Utilities (colors, logging)
+│   ├── transmission_api.sh       # Transmission API wrapper
+│   └── torrent_manager.sh        # Core torrent manager service
 ├── ui/                           # User interface scripts
 │   ├── terminal_dashboard.sh     # Full-screen dashboard
 │   └── demo_responsive.sh        # Demo showcase
@@ -180,7 +184,49 @@ bits-downloader/
 ├── downloads/                    # Downloaded files (configurable)
 ├── torrents/                     # .torrent files
 ├── logs/                         # Application logs
+├── .config                       # Application configuration
+├── uninstall.sh                  # Uninstaller script
 └── README.md                     # This file
+```
+
+### Code Architecture
+
+The project follows **SOLID** and **DRY** principles:
+
+- **Single Responsibility**: Each module has one clear purpose
+- **Open/Closed**: Easy to extend without modifying existing code
+- **Dependency Inversion**: All scripts depend on shared libraries
+- **DRY (Don't Repeat Yourself)**: Common code centralized in libraries
+
+---
+
+## 🗑️ Uninstallation
+
+### Quick Uninstall
+
+```bash
+cd bits-downloader
+./uninstall.sh
+```
+
+The uninstaller will:
+1. ✅ Stop all running torrents
+2. ✅ Stop transmission-daemon
+3. ✅ Remove the project directory
+4. ⚠️  Downloaded files are kept by default (you'll be asked)
+
+### Manual Uninstall
+
+```bash
+# Stop services
+./bin/stop_torrents.sh
+
+# Remove project
+cd ..
+rm -rf bits-downloader
+
+# Optional: Remove transmission (if no longer needed)
+sudo apt remove transmission-daemon transmission-cli
 ```
 
 ---
@@ -243,10 +289,12 @@ tail -f logs/torrent_manager.log
 ## 🎮 Keyboard Shortcuts
 
 ### Terminal Dashboard
-- `q` - Quit
-- `r` - Refresh
-- `s` - Start torrents
-- `t` - Stop torrents
+- `q` / `Q` - Quit
+- `r` / `R` - Refresh
+- `s` / `S` - Start torrent manager
+- `t` / `T` - Stop all torrents
+- `p` / `P` - Pause all torrents
+- `u` / `U` - Resume all torrents
 
 ### Monitor View
 - `Ctrl+C` - Exit
