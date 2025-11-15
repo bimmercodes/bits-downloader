@@ -291,7 +291,7 @@ This ensures scripts work from:
 ## 🎨 Features by Component
 
 ### bin/bits-downloader.sh
-- BMW-themed splash screen
+- BITS-DOWNLOADER themed splash screen
 - Installation wizard
 - Main menu navigation
 - Service management

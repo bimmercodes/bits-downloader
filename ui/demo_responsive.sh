@@ -198,7 +198,7 @@ draw_instructions() {
     move $y 0
     printf "%${WIDTH}s" " "
 
-    local text="Press 'q' to quit • Resize your terminal to see magic! ✨"
+    local text="Press 'q' or Ctrl+C to quit • Resize your terminal to see magic! ✨"
     local x=$(( (WIDTH - ${#text}) / 2 ))
     [ $x -lt 0 ] && x=0
 
@@ -268,22 +268,32 @@ handle_resize() {
 # Handle input
 handle_input() {
     local key
-    read -rsn1 -t 0.05 key
-
-    case "$key" in
-        q|Q) RUNNING=0 ;;
-    esac
+    # Use IFS= and read with timeout, check if read succeeds
+    if IFS= read -rsn1 -t 0.05 key 2>/dev/null; then
+        case "$key" in
+            q|Q)
+                RUNNING=0
+                ;;
+            $'\e')
+                # Escape key
+                RUNNING=0
+                ;;
+        esac
+    fi
 }
 
 # Cleanup
 cleanup() {
+    RUNNING=0
+    # Restore terminal state
+    stty sane 2>/dev/null
+    tput cnorm 2>/dev/null
     echo -ne "${ESC[SHOW_CURSOR]}${ESC[NORMAL_SCREEN]}${ESC[CLEAR]}${ESC[HOME]}"
-    stty echo
-    tput cnorm
     echo ""
     echo -e "\033[38;5;46m✓ Thank you for watching the demo!\033[0m"
     echo -e "\033[38;5;51m  This demo shows adaptive terminal layouts that respond to resize events.\033[0m"
     echo ""
+    exit 0
 }
 
 # Main loop
@@ -293,8 +303,8 @@ main() {
     trap handle_resize WINCH
 
     # Hide cursor and switch to alternate screen
-    stty -echo
-    tput civis
+    stty -echo 2>/dev/null
+    tput civis 2>/dev/null
     echo -ne "${ESC[ALT_SCREEN]}${ESC[HIDE_CURSOR]}"
 
     # Initial size
@@ -304,6 +314,10 @@ main() {
     while [ $RUNNING -eq 1 ]; do
         render
         handle_input
+
+        # Check if we should exit
+        [ $RUNNING -eq 0 ] && break
+
         sleep 0.05  # ~20 FPS
     done
 

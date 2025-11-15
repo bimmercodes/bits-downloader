@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Configuration
-TORRENT_DIR="/data/torrents/torrents"
-DOWNLOAD_DIR="/data/torrents/downloads"
-LOG_DIR="/data/torrents/torrent_logs"
-TORRENT_LIST="/data/torrents/torrent_list.txt"
+TORRENT_DIR="/data/bimmercodes/bits-downloader/torrents"
+DOWNLOAD_DIR="/data/downloads"
+LOG_DIR="/data/bimmercodes/bits-downloader/logs"
+TORRENT_LIST="/data/bimmercodes/bits-downloader/data/torrent_list.txt"
 MAIN_LOG="$LOG_DIR/torrent_manager.log"
 PID_FILE="/tmp/torrent_manager.pid"
 
@@ -36,52 +36,40 @@ trap 'rm -f "$PID_FILE"; log_message "Torrent manager stopped"' EXIT
 log_message "Starting torrent manager..."
 
 # Stop any existing transmission-daemon
-log_message "Stopping any existing transmission-daemon..."
-pkill -9 -f transmission-daemon 2>/dev/null
-sleep 3
+transmission-daemon --stop 2>/dev/null
+sleep 2
 
 # Start transmission-daemon with configuration
-log_message "Starting transmission-daemon..."
 transmission-daemon \
     --download-dir "$DOWNLOAD_DIR" \
     --incomplete-dir "$DOWNLOAD_DIR/.incomplete" \
     --logfile "$LOG_DIR/transmission.log" \
-    --log-level=info \
+    --log-level=2 \
     --encryption-preferred \
-    --peerlimit-global 200 \
-    --peerlimit-torrent 50 \
+    --peer-limit-global=200 \
+    --peer-limit-per-torrent=50 \
+    --download-queue-size=10 \
+    --seed-queue-size=10 \
     --no-auth \
     --allowed "127.0.0.1" \
     --port 9091
 
-# Wait for daemon to start with retry logic
-log_message "Waiting for transmission-daemon to be ready..."
-MAX_RETRIES=10
-RETRY_COUNT=0
+sleep 3
 
-while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    sleep 2
-    if transmission-remote -l &>/dev/null; then
-        log_message "Transmission-daemon started successfully on attempt $((RETRY_COUNT + 1))"
-        break
-    fi
-    RETRY_COUNT=$((RETRY_COUNT + 1))
-    log_message "Attempt $RETRY_COUNT/$MAX_RETRIES - daemon not ready yet..."
-done
-
-# Final check
+# Check if daemon started
 if ! transmission-remote -l &>/dev/null; then
-    log_message "ERROR: Failed to start transmission-daemon after $MAX_RETRIES attempts"
-    log_message "Check $LOG_DIR/transmission.log for details"
+    log_message "ERROR: Failed to start transmission-daemon"
     exit 1
 fi
+
+log_message "Transmission-daemon started successfully"
 
 # Add torrents from list or directory
 if [ -f "$TORRENT_LIST" ]; then
     log_message "Adding torrents from list..."
     while IFS= read -r torrent; do
         [ -z "$torrent" ] || [[ "$torrent" =~ ^# ]] && continue
-        
+
         if [[ "$torrent" =~ ^magnet: ]] || [[ "$torrent" =~ ^http ]]; then
             transmission-remote -a "$torrent" &>/dev/null
             if [ $? -eq 0 ]; then
@@ -118,23 +106,23 @@ log_message "Started all torrents"
 while true; do
     # Get status
     STATUS=$(transmission-remote -l 2>/dev/null)
-    
+
     if [ $? -ne 0 ]; then
         log_message "WARNING: Cannot connect to transmission-daemon"
         sleep 30
         continue
     fi
-    
+
     # Parse active downloads
     ACTIVE=$(echo "$STATUS" | grep -E "Downloading|Seeding" | wc -l)
     TOTAL=$(echo "$STATUS" | tail -n 1 | awk '{print $1}')
-    
+
     # Log summary every 5 minutes
     log_message "Status: Active: $ACTIVE | Total in queue: $TOTAL"
-    
+
     # Detailed status to separate file
     echo "$STATUS" > "$LOG_DIR/current_status.txt"
-    
+
     # Check completed
     while IFS= read -r line; do
         if echo "$line" | grep -q "100%.*Seeding"; then
@@ -146,6 +134,6 @@ while true; do
             fi
         fi
     done <<< "$STATUS"
-    
+
     sleep 300  # Check every 5 minutes
 done

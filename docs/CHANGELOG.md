@@ -5,7 +5,7 @@
 ### Major Changes
 
 #### New TUI Application
-- **NEW**: `bits-downloader.sh` - Main TUI entry point with ASCII BMW logo
+- **NEW**: `bits-downloader.sh` - Main TUI entry point with ASCII BITS-DOWNLOADER logo
 - Beautiful splash screen on startup
 - Unified interface for all operations
 - Color-coded menus with intuitive navigation
@@ -92,7 +92,7 @@ bits-downloader/
 ```
 
 #### Color Scheme
-- **Blue**: Headers, system info, BMW logo
+- **Blue**: Headers, system info, BITS-DOWNLOADER logo
 - **Cyan**: Section headers, important info
 - **Green**: Success messages, active items
 - **Yellow**: Warnings, attention items

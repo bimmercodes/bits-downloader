@@ -2,8 +2,8 @@
 
 BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$BIN_DIR/.." && pwd)"
-LOG_DIR="$PROJECT_ROOT/logs"
-DOWNLOAD_DIR="$PROJECT_ROOT/downloads"
+LOG_DIR="/data/bimmercodes/bits-downloader/logs"
+DOWNLOAD_DIR="/data/downloads"
 
 # Color codes
 RED='\033[0;31m'

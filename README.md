@@ -26,13 +26,13 @@
 ### One-Line Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bimmercodes/bits-downloader/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/bimmercodes/bits-downloader/refs/heads/master/install.sh | bash
 ```
 
 Or with wget:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/bimmercodes/bits-downloader/main/install.sh | bash
+wget -qO- https://raw.githubusercontent.com/bimmercodes/bits-downloader/refs/heads/master/install.sh | bash
 ```
 
 That's it! The installer will:
