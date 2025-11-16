@@ -13,6 +13,11 @@ source "$PROJECT_ROOT/lib/utils.sh"
 source "$PROJECT_ROOT/lib/transmission_api.sh"
 
 DIALOG_BIN="${DIALOG_BIN:-dialog}"
+DIALOG_OPTS=(--no-shadow --no-lines)
+
+dialog_cmd() {
+    "$DIALOG_BIN" "${DIALOG_OPTS[@]}" "$@"
+}
 
 require_dialog() {
     if ! command -v "$DIALOG_BIN" >/dev/null 2>&1; then
@@ -33,21 +38,36 @@ ensure_setup() {
     [ -f "$TORRENT_LIST" ] || touch "$TORRENT_LIST"
 }
 
+center_line() {
+    local text="$1" width="$2"
+    local pad=$(( (width - ${#text}) / 2 ))
+    [ $pad -lt 0 ] && pad=0
+    printf "%*s%s" "$pad" "" "$text"
+}
+
 show_splash() {
-    "$DIALOG_BIN" --backtitle "BITS Downloader" --title "Welcome" \
-        --msgbox "BITS Downloader\n\nFast, bash-native torrent manager.\n\n• Live dashboard\n• Add torrents quickly\n• View torrent details\n• Start/stop Transmission\n\nPress OK to continue." 14 60
+    local width=70
+    local heading
+    local subheading
+    local credit
+    heading=$(center_line "Welcome to Bits Downloader" "$width")
+    subheading=$(center_line "Fast, bash-native torrent manager" "$width")
+    credit=$(center_line "Made with <3 by bimmercodes" "$width")
+
+    dialog_cmd --backtitle "BITS Downloader" --title "Welcome" \
+        --msgbox "$heading\n$subheading\n$credit" 9 "$width"
 }
 
 start_manager() {
     ensure_setup
 
     if ! ensure_transmission_available; then
-        "$DIALOG_BIN" --title "Missing dependency" --msgbox "transmission-daemon is required. Please install transmission-cli/transmission-daemon packages and try again." 8 70
+        dialog_cmd --title "Missing dependency" --msgbox "transmission-daemon is required. Please install transmission-cli/transmission-daemon packages and try again." 8 70
         return
     fi
 
     if pgrep -f "torrent_manager.sh" >/dev/null 2>&1; then
-        "$DIALOG_BIN" --title "Already Running" --msgbox "Torrent manager is already running." 6 50
+        dialog_cmd --title "Already Running" --msgbox "Torrent manager is already running." 6 50
         return
     fi
 
@@ -55,9 +75,9 @@ start_manager() {
     sleep 2
 
     if pgrep -f "torrent_manager.sh" >/dev/null 2>&1; then
-        "$DIALOG_BIN" --title "Started" --msgbox "Torrent manager is now running. Transmission will be started automatically if needed." 8 70
+        dialog_cmd --title "Started" --msgbox "Torrent manager is now running. Transmission will be started automatically if needed." 8 70
     else
-        "$DIALOG_BIN" --title "Error" --msgbox "Failed to start torrent manager. Check $LOG_DIR/nohup.log for details." 8 70
+        dialog_cmd --title "Error" --msgbox "Failed to start torrent manager. Check $LOG_DIR/nohup.log for details." 8 70
     fi
 }
 
@@ -65,24 +85,24 @@ stop_manager() {
     stop_torrent "all" || true
     stop_transmission || true
     pkill -f "torrent_manager.sh" >/dev/null 2>&1 || true
-    "$DIALOG_BIN" --title "Stopped" --msgbox "All torrents paused and transmission-daemon stopped." 7 60
+    dialog_cmd --title "Stopped" --msgbox "All torrents paused and transmission-daemon stopped." 7 60
 }
 
 resume_all() {
     if is_transmission_running; then
         start_torrent "all"
-        "$DIALOG_BIN" --title "Resumed" --msgbox "All torrents resumed." 6 40
+        dialog_cmd --title "Resumed" --msgbox "All torrents resumed." 6 40
     else
-        "$DIALOG_BIN" --title "Not Running" --msgbox "Transmission is not running. Start it first." 6 60
+        dialog_cmd --title "Not Running" --msgbox "Transmission is not running. Start it first." 6 60
     fi
 }
 
 pause_all() {
     if is_transmission_running; then
         stop_torrent "all"
-        "$DIALOG_BIN" --title "Paused" --msgbox "All torrents paused." 6 40
+        dialog_cmd --title "Paused" --msgbox "All torrents paused." 6 40
     else
-        "$DIALOG_BIN" --title "Not Running" --msgbox "Transmission is not running. Start it first." 6 60
+        dialog_cmd --title "Not Running" --msgbox "Transmission is not running. Start it first." 6 60
     fi
 }
 
@@ -95,20 +115,23 @@ prompt_add_torrent() {
     ensure_setup
 
     if ! is_transmission_running; then
-        "$DIALOG_BIN" --title "Not Running" --yesno "Transmission is not running. Start it now?" 8 60 \
-            && start_manager
+        dialog_cmd --title "Not Running" --yesno "Transmission is not running. Start it now?" 8 60
+        case $? in
+            0) start_manager ;;
+            1|3) return ;; # cancel or ESC
+        esac
     fi
 
     local torrent
-    torrent=$("$DIALOG_BIN" --stdout --backtitle "Add Torrent" --title "Add Torrent" \
+    torrent=$(dialog_cmd --stdout --backtitle "Add Torrent" --title "Add Torrent" \
         --inputbox "Paste a magnet link, URL, or path to a .torrent file." 9 70) || return
 
     [ -z "$torrent" ] && return
 
     if add_torrent "$torrent" "$DOWNLOAD_DIR"; then
-        "$DIALOG_BIN" --title "Added" --msgbox "Torrent added successfully." 6 40
+        dialog_cmd --title "Added" --msgbox "Torrent added successfully." 6 40
     else
-        "$DIALOG_BIN" --title "Error" --msgbox "Failed to add torrent. Verify the link or file path." 7 60
+        dialog_cmd --title "Error" --msgbox "Failed to add torrent. Verify the link or file path." 7 60
     fi
 }
 
@@ -118,7 +141,7 @@ build_torrent_menu_options() {
 
 select_torrent() {
     build_torrent_menu_options
-    [ ${#TORRENT_ROWS[@]} -eq 0 ] && return 1
+    [ ${#TORRENT_ROWS[@]} -eq 0 ] && return 2
 
     local options=()
     for row in "${TORRENT_ROWS[@]}"; do
@@ -127,32 +150,39 @@ select_torrent() {
         options+=("$id" "$desc")
     done
 
-    "$DIALOG_BIN" --stdout --backtitle "BITS Downloader" --title "Torrents" \
-        --menu "Select a torrent to view details." 20 90 12 "${options[@]}" || return 1
+    local selection
+    selection=$(dialog_cmd --stdout --backtitle "BITS Downloader" --title "Torrents" \
+        --menu "Select a torrent to view details." 20 90 12 "${options[@]}")
+
+    local status=$?
+    [ $status -ne 0 ] && return $status
+    echo "$selection"
 }
 
 show_torrent_details() {
     if ! is_transmission_running; then
-        "$DIALOG_BIN" --title "Not Running" --msgbox "Transmission is not running. Start it first." 6 60
+        dialog_cmd --title "Not Running" --msgbox "Transmission is not running. Start it first." 6 60
         return
     fi
 
     local selection
-    selection=$(select_torrent) || {
-        "$DIALOG_BIN" --title "No Torrents" --msgbox "No torrents are currently available." 6 60
+    selection=$(select_torrent)
+    local status=$?
+    if [ $status -ne 0 ]; then
+        [ $status -eq 2 ] && dialog_cmd --title "No Torrents" --msgbox "No torrents are currently available." 6 60
         return
-    }
+    fi
 
     local details
     details=$(get_torrent_info "$selection" 2>/dev/null || echo "Unable to fetch torrent info.")
 
-    "$DIALOG_BIN" --title "Torrent #$selection" --msgbox "$details" 20 90
+    dialog_cmd --title "Torrent #$selection" --msgbox "$details" 20 90
 }
 
 show_settings() {
     local running="OFF"
     is_transmission_running && running="ON"
-    "$DIALOG_BIN" --title "Settings" --msgbox "Transmission: $running\n\nDownload dir: $DOWNLOAD_DIR\nTorrent dir:  $TORRENT_DIR\nLogs dir:     $LOG_DIR\nTorrent list: $TORRENT_LIST" 12 80
+    dialog_cmd --title "Settings" --msgbox "Transmission: $running\n\nDownload dir: $DOWNLOAD_DIR\nTorrent dir:  $TORRENT_DIR\nLogs dir:     $LOG_DIR\nTorrent list: $TORRENT_LIST" 12 80
 }
 
 menu_label_status() {
@@ -171,7 +201,7 @@ main_menu() {
         status_text=$(menu_label_status)
 
         local choice
-        choice=$("$DIALOG_BIN" --stdout --clear --backtitle "BITS Downloader" --title "Main Dashboard" \
+        choice=$(dialog_cmd --stdout --clear --backtitle "BITS Downloader" --title "Main Dashboard" \
             --menu "$status_text\n\nUse arrow keys to navigate and Enter to select." 20 80 10 \
             dashboard "Open live dashboard (tput UI)" \
             add "Add a new torrent (magnet/URL/file)" \
@@ -181,7 +211,13 @@ main_menu() {
             resume "Resume all torrents" \
             pause "Pause all torrents" \
             settings "Show current paths and status" \
-            quit "Exit") || break
+            quit "Exit")
+
+        local status=$?
+        # Cancel/ESC returns to menu; only quit choice exits.
+        if [ $status -ne 0 ]; then
+            continue
+        fi
 
         # If the user pressed ESC/cancel, redisplay the menu instead of exiting the app
         if [ -z "${choice:-}" ]; then

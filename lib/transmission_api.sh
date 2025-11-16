@@ -187,7 +187,7 @@ get_torrent_field() {
             echo "$info" | grep "^ *Total size:" | awk '{print $3, $4}'
             ;;
         downloaded|DOWNLOADED|have)
-            echo "$info" | grep "^ *Have:" | awk '{print $2, $3}'
+            echo "$info" | grep "^ *Have:" | cut -d: -f2- | xargs
             ;;
         eta|ETA)
             echo "$info" | grep "^ *ETA:" | cut -d: -f2- | xargs
@@ -209,6 +209,9 @@ get_torrent_field() {
             ;;
         location|LOCATION)
             echo "$info" | grep "^ *Location:" | cut -d: -f2- | xargs
+            ;;
+        availability|AVAILABILITY)
+            echo "$info" | grep "^ *Availability:" | awk '{print $2}'
             ;;
         *)
             return 1

@@ -138,7 +138,7 @@ draw_torrent_section() {
     local box_y=3
     local box_x=1
     local box_width=$((TERM_WIDTH - 2))
-    local details_height=14
+    local details_height=8
     local box_height=$((TERM_HEIGHT - 9 - details_height))
 
     [ $box_height -lt 5 ] && box_height=5
@@ -236,7 +236,7 @@ draw_torrent_section() {
 
 # Draw torrent details for selected torrent
 draw_torrent_details() {
-    local details_height=14
+    local details_height=8
     local box_width=$((TERM_WIDTH - 2))
     local box_x=1
     local box_y=$((TERM_HEIGHT - details_height - 6)) # sit above stats/footer area
@@ -254,21 +254,20 @@ draw_torrent_details() {
         return
     fi
 
-    local id_field name percent size have eta status location ratio uploaded downloaded
+    local id_field name eta downloaded uploaded size downloaded_total peers availability location
 
     local selected_line="${TORRENT_CACHE[$SELECTED_INDEX]}"
     id_field=$(echo "$selected_line" | awk '{print $1}')
 
     name=$(get_torrent_field "$id_field" "name")
-    percent=$(get_torrent_field "$id_field" "percent")
-    size=$(get_torrent_field "$id_field" "size")
-    have=$(get_torrent_field "$id_field" "downloaded")
     eta=$(get_torrent_field "$id_field" "eta")
-    status=$(get_torrent_field "$id_field" "status")
-    location=$(get_torrent_field "$id_field" "location")
-    ratio=$(get_torrent_field "$id_field" "ratio")
     uploaded=$(get_torrent_field "$id_field" "upload_speed")
     downloaded=$(get_torrent_field "$id_field" "download_speed")
+    size=$(get_torrent_field "$id_field" "size")
+    downloaded_total=$(get_torrent_field "$id_field" "downloaded")
+    peers=$(get_torrent_field "$id_field" "peers")
+    availability=$(get_torrent_field "$id_field" "availability")
+    location=$(get_torrent_field "$id_field" "location")
 
     local line
 
@@ -277,15 +276,15 @@ draw_torrent_details() {
     printf "%-${content_width}s" "$line"
 
     tput cup $((content_y + 1)) $content_x
-    line=$(printf "${COLORS[CYAN]}Progress:${COLORS[RESET]} %s  ${COLORS[CYAN]}Total:${COLORS[RESET]} %s  ${COLORS[CYAN]}Have:${COLORS[RESET]} %s" "${percent:-N/A}" "${size:-N/A}" "${have:-N/A}")
+    line=$(printf "${COLORS[CYAN]}Downloaded:${COLORS[RESET]} %s  ${COLORS[CYAN]}Total:${COLORS[RESET]} %s" "${downloaded_total:-N/A}" "${size:-N/A}")
     printf "%-${content_width}s" "$line"
 
     tput cup $((content_y + 2)) $content_x
-    line=$(printf "${COLORS[CYAN]}ETA:${COLORS[RESET]} %s  ${COLORS[CYAN]}Status:${COLORS[RESET]} %s  ${COLORS[CYAN]}Ratio:${COLORS[RESET]} %s" "${eta:-N/A}" "${status:-N/A}" "${ratio:-N/A}")
+    line=$(printf "${COLORS[CYAN]}ETA:${COLORS[RESET]} %s  ${COLORS[CYAN]}Speeds:${COLORS[RESET]} ↓ %s  ↑ %s" "${eta:-N/A}" "${downloaded:-N/A}" "${uploaded:-N/A}")
     printf "%-${content_width}s" "$line"
 
     tput cup $((content_y + 3)) $content_x
-    line=$(printf "${COLORS[CYAN]}Speeds:${COLORS[RESET]} ↓ %s  ↑ %s" "${downloaded:-N/A}" "${uploaded:-N/A}")
+    line=$(printf "${COLORS[CYAN]}Peers:${COLORS[RESET]} %s  ${COLORS[CYAN]}Availability:${COLORS[RESET]} %s" "${peers:-N/A}" "${availability:-N/A}")
     printf "%-${content_width}s" "$line"
 
     tput cup $((content_y + 4)) $content_x
