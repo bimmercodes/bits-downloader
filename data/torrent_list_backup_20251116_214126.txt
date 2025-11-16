@@ -1,0 +1,14 @@
+# Torrent List - Add magnet links, URLs, or file paths (one per line)
+# Lines starting with # are ignored
+#
+# Example formats:
+# magnet:?xt=urn:btih:HASH&dn=NAME
+# http://example.com/file.torrent
+# /path/to/local/file.torrent
+#
+# Add your torrent links below:
+/data/torrents/torrents/4.40.50_PSdZData.7z.torrent
+/data/torrents/torrents/ISTA_4.13.14_18-03_ILEVEL_ID4_ID6_FLASH.torrent
+/data/torrents/torrents/ISTA_4.56.20_PSdZData.7z.torrent 
+/data/torrents/torrents/ISTA_4.56.32_PSdZData.7z.torrent 
+/data/torrents/torrents/ISTA_Standalone_4.39.20.torrent
