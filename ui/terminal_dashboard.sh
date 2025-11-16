@@ -19,6 +19,9 @@ NEED_REDRAW=1
 RUNNING=1
 FIRST_DRAW=1
 LAST_REFRESH=0
+SCROLL_OFFSET=0
+TORRENT_TOTAL_LINES=0
+TORRENT_VIEW_HEIGHT=0
 
 # Get terminal dimensions
 get_terminal_size() {
@@ -163,35 +166,43 @@ draw_torrent_section() {
     local content_width=$((box_width - 4))
     local content_height=$((box_height - 2))
 
-    # Get torrent data
-    local line_num=0
-    while IFS= read -r line && [ $line_num -lt $content_height ]; do
-        tput cup $((content_y + line_num)) $content_x
+    TORRENT_VIEW_HEIGHT=$content_height
 
-        # Colorize based on status
-        if [[ "$line" =~ "100%" ]] || [[ "$line" =~ "Seeding" ]]; then
-            echo -ne "${COLORS[GREEN]}"
-        elif [[ "$line" =~ "Downloading" ]] || [[ "$line" =~ "Up & Down" ]]; then
-            echo -ne "${COLORS[YELLOW]}"
-        elif [[ "$line" =~ "Stopped" ]] || [[ "$line" =~ "Idle" ]]; then
-            echo -ne "${COLORS[RED]}"
+    # Get torrent data and cache counts for scrolling
+    mapfile -t torrents < <(get_torrent_stats)
+    TORRENT_TOTAL_LINES=${#torrents[@]}
+
+    # Clamp scroll offset to available lines
+    local max_offset=$((TORRENT_TOTAL_LINES - TORRENT_VIEW_HEIGHT))
+    (( max_offset < 0 )) && max_offset=0
+    (( SCROLL_OFFSET > max_offset )) && SCROLL_OFFSET=$max_offset
+
+    # Render visible window with scroll offset
+    for ((i=0; i<content_height; i++)); do
+        tput cup $((content_y + i)) $content_x
+        local idx=$((i + SCROLL_OFFSET))
+
+        if [ $idx -lt $TORRENT_TOTAL_LINES ]; then
+            local line="${torrents[$idx]}"
+
+            # Colorize based on status
+            if [[ "$line" =~ "100%" ]] || [[ "$line" =~ "Seeding" ]]; then
+                echo -ne "${COLORS[GREEN]}"
+            elif [[ "$line" =~ "Downloading" ]] || [[ "$line" =~ "Up & Down" ]]; then
+                echo -ne "${COLORS[YELLOW]}"
+            elif [[ "$line" =~ "Stopped" ]] || [[ "$line" =~ "Idle" ]]; then
+                echo -ne "${COLORS[RED]}"
+            else
+                echo -ne "${COLORS[CYAN]}"
+            fi
+
+            # Truncate line to fit
+            local display_line="${line:0:$content_width}"
+            printf "%-${content_width}s" "$display_line"
+            echo -ne "${COLORS[RESET]}"
         else
-            echo -ne "${COLORS[CYAN]}"
+            printf "%${content_width}s" " "
         fi
-
-        # Truncate line to fit
-        local display_line="${line:0:$content_width}"
-        printf "%-${content_width}s" "$display_line"
-        echo -ne "${COLORS[RESET]}"
-
-        ((line_num++))
-    done < <(get_torrent_stats)
-
-    # Fill remaining space
-    while [ $line_num -lt $content_height ]; do
-        tput cup $((content_y + line_num)) $content_x
-        printf "%${content_width}s" " "
-        ((line_num++))
     done
 }
 
@@ -283,12 +294,33 @@ handle_input() {
     local key
     read -rsn1 -t 0.1 key
 
+    # Capture escape sequences for arrow keys
+    if [[ "$key" == $'\e' ]]; then
+        local rest
+        read -rsn2 -t 0.05 rest
+        key+="$rest"
+    fi
+
     case "$key" in
         q|Q)
             cleanup
             ;;
         r|R)
             NEED_REDRAW=1
+            ;;
+        $'\e[A') # Up arrow: scroll up
+            if [ $SCROLL_OFFSET -gt 0 ]; then
+                SCROLL_OFFSET=$((SCROLL_OFFSET - 1))
+                NEED_REDRAW=1
+            fi
+            ;;
+        $'\e[B') # Down arrow: scroll down
+            local max_offset=$((TORRENT_TOTAL_LINES - TORRENT_VIEW_HEIGHT))
+            (( max_offset < 0 )) && max_offset=0
+            if [ $SCROLL_OFFSET -lt $max_offset ]; then
+                SCROLL_OFFSET=$((SCROLL_OFFSET + 1))
+                NEED_REDRAW=1
+            fi
             ;;
         s|S)
             # Start torrent manager

@@ -17,6 +17,24 @@ NC='\033[0m'
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$SCRIPT_DIR"
+PKG_MANAGER=""
+REMOVE_HINT=""
+
+detect_package_manager() {
+    if command -v apt-get >/dev/null 2>&1; then
+        PKG_MANAGER="apt-get"
+        REMOVE_HINT="sudo apt-get remove transmission-cli transmission-daemon transmission-common dialog"
+    elif command -v dnf >/dev/null 2>&1; then
+        PKG_MANAGER="dnf"
+        REMOVE_HINT="sudo dnf remove transmission-cli transmission-daemon dialog"
+    elif command -v yum >/dev/null 2>&1; then
+        PKG_MANAGER="yum"
+        REMOVE_HINT="sudo yum remove transmission-cli transmission-daemon dialog"
+    else
+        PKG_MANAGER="unknown"
+        REMOVE_HINT="(remove transmission packages via your package manager)"
+    fi
+}
 
 # Banner
 show_banner() {
@@ -200,7 +218,7 @@ show_completion() {
 
     echo ""
     echo -e "${YELLOW}To remove transmission completely, run:${NC}"
-    echo -e "  ${WHITE}sudo apt-get remove transmission-cli transmission-daemon transmission-common${NC}"
+    echo -e "  ${WHITE}$REMOVE_HINT${NC}"
     echo ""
     echo -e "${GREEN}Thank you for using bits-downloader!${NC}"
     echo -e "${BLUE}Made with ❤️  by bimmercodes${NC}"
@@ -209,6 +227,7 @@ show_completion() {
 
 # Main uninstallation flow
 main() {
+    detect_package_manager
     show_banner
     confirm_uninstall
     stop_services

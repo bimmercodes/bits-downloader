@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+
+# bits-manager - Dialog-driven TUI wrapper for bits-downloader
+# Uses dialog (ncurses) for navigation and launches the live terminal dashboard.
+
+set -euo pipefail
+
+BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$BIN_DIR/.." && pwd)"
+
+source "$PROJECT_ROOT/lib/config.sh"
+source "$PROJECT_ROOT/lib/utils.sh"
+source "$PROJECT_ROOT/lib/transmission_api.sh"
+
+DIALOG_BIN="${DIALOG_BIN:-dialog}"
+
+require_dialog() {
+    if ! command -v "$DIALOG_BIN" >/dev/null 2>&1; then
+        echo "dialog is required for the new UI. Please install it via your package manager."
+        exit 1
+    fi
+}
+
+cleanup_ui() {
+    tput sgr0 2>/dev/null || true
+    tput cnorm 2>/dev/null || true
+    clear
+}
+
+ensure_setup() {
+    ensure_directories
+    mkdir -p "$PROJECT_ROOT/data"
+    [ -f "$TORRENT_LIST" ] || touch "$TORRENT_LIST"
+}
+
+show_splash() {
+    "$DIALOG_BIN" --backtitle "BITS Downloader" --title "Welcome" \
+        --msgbox "BITS Downloader\n\nFast, bash-native torrent manager.\n\n• Live dashboard\n• Add torrents quickly\n• View torrent details\n• Start/stop Transmission\n\nPress OK to continue." 14 60
+}
+
+start_manager() {
+    ensure_setup
+
+    if pgrep -f "torrent_manager.sh" >/dev/null 2>&1; then
+        "$DIALOG_BIN" --title "Already Running" --msgbox "Torrent manager is already running." 6 50
+        return
+    fi
+
+    if start_transmission "$DOWNLOAD_DIR" "$DOWNLOAD_DIR/.incomplete" "$LOG_DIR/transmission.log"; then
+        nohup "$PROJECT_ROOT/lib/torrent_manager.sh" > "$LOG_DIR/nohup.log" 2>&1 &
+        "$DIALOG_BIN" --title "Started" --msgbox "Transmission daemon and torrent manager are now running." 7 60
+    else
+        "$DIALOG_BIN" --title "Error" --msgbox "Failed to start transmission-daemon. Check logs in $LOG_DIR." 7 60
+    fi
+}
+
+stop_manager() {
+    stop_torrent "all" || true
+    stop_transmission || true
+    pkill -f "torrent_manager.sh" >/dev/null 2>&1 || true
+    "$DIALOG_BIN" --title "Stopped" --msgbox "All torrents paused and transmission-daemon stopped." 7 60
+}
+
+resume_all() {
+    if is_transmission_running; then
+        start_torrent "all"
+        "$DIALOG_BIN" --title "Resumed" --msgbox "All torrents resumed." 6 40
+    else
+        "$DIALOG_BIN" --title "Not Running" --msgbox "Transmission is not running. Start it first." 6 60
+    fi
+}
+
+pause_all() {
+    if is_transmission_running; then
+        stop_torrent "all"
+        "$DIALOG_BIN" --title "Paused" --msgbox "All torrents paused." 6 40
+    else
+        "$DIALOG_BIN" --title "Not Running" --msgbox "Transmission is not running. Start it first." 6 60
+    fi
+}
+
+launch_dashboard() {
+    cleanup_ui
+    "$PROJECT_ROOT/ui/terminal_dashboard.sh"
+}
+
+prompt_add_torrent() {
+    ensure_setup
+
+    if ! is_transmission_running; then
+        "$DIALOG_BIN" --title "Not Running" --yesno "Transmission is not running. Start it now?" 8 60 \
+            && start_manager
+    fi
+
+    local torrent
+    torrent=$("$DIALOG_BIN" --stdout --backtitle "Add Torrent" --title "Add Torrent" \
+        --inputbox "Paste a magnet link, URL, or path to a .torrent file." 9 70) || return
+
+    [ -z "$torrent" ] && return
+
+    if add_torrent "$torrent" "$DOWNLOAD_DIR"; then
+        "$DIALOG_BIN" --title "Added" --msgbox "Torrent added successfully." 6 40
+    else
+        "$DIALOG_BIN" --title "Error" --msgbox "Failed to add torrent. Verify the link or file path." 7 60
+    fi
+}
+
+build_torrent_menu_options() {
+    mapfile -t TORRENT_ROWS < <(transmission-remote -l 2>/dev/null | awk 'NR>1 && $1!="Sum:" {id=$1; $1=""; sub(/^ +/,""); printf "%s\t%s\n", id, $0}')
+}
+
+select_torrent() {
+    build_torrent_menu_options
+    [ ${#TORRENT_ROWS[@]} -eq 0 ] && return 1
+
+    local options=()
+    for row in "${TORRENT_ROWS[@]}"; do
+        local id="${row%%$'\t'*}"
+        local desc="${row#*$'\t'}"
+        options+=("$id" "$desc")
+    done
+
+    "$DIALOG_BIN" --stdout --backtitle "BITS Downloader" --title "Torrents" \
+        --menu "Select a torrent to view details." 20 90 12 "${options[@]}" || return 1
+}
+
+show_torrent_details() {
+    if ! is_transmission_running; then
+        "$DIALOG_BIN" --title "Not Running" --msgbox "Transmission is not running. Start it first." 6 60
+        return
+    fi
+
+    local selection
+    selection=$(select_torrent) || {
+        "$DIALOG_BIN" --title "No Torrents" --msgbox "No torrents are currently available." 6 60
+        return
+    }
+
+    local details
+    details=$(get_torrent_info "$selection" 2>/dev/null || echo "Unable to fetch torrent info.")
+
+    "$DIALOG_BIN" --title "Torrent #$selection" --msgbox "$details" 20 90
+}
+
+show_settings() {
+    local running="OFF"
+    is_transmission_running && running="ON"
+    "$DIALOG_BIN" --title "Settings" --msgbox "Transmission: $running\n\nDownload dir: $DOWNLOAD_DIR\nTorrent dir:  $TORRENT_DIR\nLogs dir:     $LOG_DIR\nTorrent list: $TORRENT_LIST" 12 80
+}
+
+menu_label_status() {
+    local running="Stopped"
+    local active="0"
+    if is_transmission_running; then
+        running="Running"
+        active=$(get_active_count 2>/dev/null || echo "0")
+    fi
+    echo "Transmission: $running | Active: $active | Download dir: $DOWNLOAD_DIR"
+}
+
+main_menu() {
+    while true; do
+        local status_text
+        status_text=$(menu_label_status)
+
+        local choice
+        choice=$("$DIALOG_BIN" --stdout --clear --backtitle "BITS Downloader" --title "Main Dashboard" \
+            --menu "$status_text\n\nUse arrow keys to navigate and Enter to select." 20 80 10 \
+            dashboard "Open live dashboard (tput UI)" \
+            add "Add a new torrent (magnet/URL/file)" \
+            details "View torrent details" \
+            start "Start transmission + manager" \
+            stop "Stop transmission + pause all" \
+            resume "Resume all torrents" \
+            pause "Pause all torrents" \
+            settings "Show current paths and status" \
+            quit "Exit") || break
+
+        # If the user pressed ESC/cancel, redisplay the menu instead of exiting the app
+        if [ -z "${choice:-}" ]; then
+            continue
+        fi
+
+        case "$choice" in
+            dashboard) launch_dashboard ;;
+            add) prompt_add_torrent ;;
+            details) show_torrent_details ;;
+            start) start_manager ;;
+            stop) stop_manager ;;
+            resume) resume_all ;;
+            pause) pause_all ;;
+            settings) show_settings ;;
+            quit) break ;;
+        esac
+    done
+}
+
+main() {
+    trap cleanup_ui EXIT INT TERM
+    require_dialog
+    ensure_setup
+    show_splash
+    main_menu
+    cleanup_ui
+}
+
+main "$@"

@@ -17,7 +17,7 @@ ensure_directories
 # Check if already running
 if pgrep -f "torrent_manager.sh" > /dev/null; then
     print_warning "Torrent manager is already running!"
-    echo "Use ./bin/bits-downloader.sh to access the monitor"
+    echo "Use ./bin/bits-manager.sh to access the monitor"
     exit 1
 fi
 
@@ -45,4 +45,4 @@ echo ""
 echo "Download directory: $DOWNLOAD_DIR"
 echo "Logs directory: $LOG_DIR"
 echo ""
-echo "Use ./bin/bits-downloader.sh to monitor and control torrents"
+echo "Use ./bin/bits-manager.sh to monitor and control torrents"

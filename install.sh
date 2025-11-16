@@ -18,6 +18,50 @@ NC='\033[0m'
 # Configuration
 REPO_URL="https://github.com/bimmercodes/bits-downloader.git"
 INSTALL_DIR="$HOME/bits-downloader"
+PKG_MANAGER=""
+PKG_REFRESHED=0
+
+# Detect package manager (Debian/Ubuntu: apt-get, Fedora: dnf, CentOS/RHEL: yum/dnf)
+detect_package_manager() {
+    if command -v apt-get >/dev/null 2>&1; then
+        PKG_MANAGER="apt-get"
+    elif command -v dnf >/dev/null 2>&1; then
+        PKG_MANAGER="dnf"
+    elif command -v yum >/dev/null 2>&1; then
+        PKG_MANAGER="yum"
+    else
+        echo -e "${RED}Unsupported distribution. Please install dependencies manually (git, curl/wget, dialog, transmission-daemon).${NC}"
+        exit 1
+    fi
+}
+
+run_pkg_update_once() {
+    if [ $PKG_REFRESHED -eq 0 ]; then
+        case "$PKG_MANAGER" in
+            apt-get) sudo apt-get update ;;
+            dnf) sudo dnf -y makecache ;;
+            yum) sudo yum -y makecache ;;
+        esac
+        PKG_REFRESHED=1
+    fi
+}
+
+install_packages() {
+    local packages=("$@")
+    run_pkg_update_once
+
+    case "$PKG_MANAGER" in
+        apt-get)
+            sudo apt-get install -y "${packages[@]}"
+            ;;
+        dnf)
+            sudo dnf install -y "${packages[@]}"
+            ;;
+        yum)
+            sudo yum install -y "${packages[@]}"
+            ;;
+    esac
+}
 
 # Banner
 show_banner() {
@@ -42,20 +86,29 @@ EOF
 # Check requirements
 check_requirements() {
     echo -e "${BLUE}[1/5]${NC} Checking requirements..."
+    detect_package_manager
 
     # Check git
-    if ! command -v git &> /dev/null; then
+    if ! command -v git >/dev/null 2>&1; then
         echo -e "${RED}✗ git is not installed${NC}"
         echo -e "${YELLOW}Installing git...${NC}"
-        sudo apt-get update && sudo apt-get install -y git
+        install_packages git
     else
         echo -e "${GREEN}✓ git is installed${NC}"
     fi
 
     # Check curl/wget
-    if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
+    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
         echo -e "${YELLOW}Installing curl...${NC}"
-        sudo apt-get install -y curl
+        install_packages curl
+    fi
+
+    # Check dialog (TUI library)
+    if ! command -v dialog >/dev/null 2>&1; then
+        echo -e "${YELLOW}Installing dialog (required for the new UI)...${NC}"
+        install_packages dialog
+    else
+        echo -e "${GREEN}✓ dialog is installed${NC}"
     fi
 
     echo ""
@@ -92,8 +145,15 @@ install_transmission() {
         echo -e "${YELLOW}transmission-daemon not found${NC}"
         echo -e "${CYAN}Installing transmission packages...${NC}"
         echo ""
-        sudo apt-get update
-        sudo apt-get install -y transmission-cli transmission-daemon transmission-common
+
+        case "$PKG_MANAGER" in
+            apt-get)
+                install_packages transmission-cli transmission-daemon transmission-common
+                ;;
+            dnf|yum)
+                install_packages transmission-cli transmission-daemon
+                ;;
+        esac
 
         # Stop system transmission service if running
         sudo systemctl stop transmission-daemon 2>/dev/null || true
@@ -141,7 +201,7 @@ create_launcher() {
     cat > "$HOME/bits" << 'LAUNCHER'
 #!/bin/bash
 cd "$HOME/bits-downloader"
-./bin/bits-downloader.sh "$@"
+./bin/bits-manager.sh "$@"
 LAUNCHER
 
     chmod +x "$HOME/bits"
@@ -165,7 +225,7 @@ show_completion() {
     echo ""
     echo -e "${WHITE}Quick Start:${NC}"
     echo -e "  ${CYAN}1.${NC} Run: ${YELLOW}cd $INSTALL_DIR${NC}"
-    echo -e "  ${CYAN}2.${NC} Run: ${YELLOW}./bin/bits-downloader.sh${NC}"
+    echo -e "  ${CYAN}2.${NC} Run: ${YELLOW}./bin/bits-manager.sh${NC}"
     echo ""
     echo -e "${WHITE}Or simply run from anywhere:${NC}"
     echo -e "  ${YELLOW}~/bits${NC}"

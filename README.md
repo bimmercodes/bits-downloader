@@ -11,15 +11,13 @@
 
 ## ✨ Features
 
-- 🎨 **Beautiful Terminal UI** - Multiple interfaces including full-screen responsive dashboard
-- 📊 **Real-time Monitoring** - Watch your downloads progress in real-time
-- 🔄 **Auto-resume** - Automatically resume incomplete downloads
-- 📁 **Organized Downloads** - Clean directory structure with automatic organization
-- 🎮 **Interactive Control** - Full control panel for managing torrents
+- 🎨 **Dialog-first TUI** - Splash screen plus navigation menus powered by `dialog`
+- 📊 **Live Terminal Dashboard** - Full-screen dashboard with keyboard scrolling
+- ➕ **Quick Actions** - Add torrents, inspect details, pause/resume with a few keystrokes
+- 🛠️ **Cross-distro Install** - Debian/Ubuntu, Fedora, and CentOS/RHEL friendly
 - 📝 **Comprehensive Logging** - Detailed logs for all operations
 - 🌈 **Responsive Design** - Terminal UI adapts to any screen size
-- ⚡ **Fast & Efficient** - Powered by transmission-daemon
-- 🏗️ **Clean Architecture** - Built with SOLID and DRY principles
+- 🏗️ **Clean Architecture** - Bash with shared libraries and minimal dependencies
 - 🔧 **Easy Configuration** - Customizable download directories and settings
 
 ---
@@ -49,9 +47,9 @@ That's it! The installer will:
 
 ## 📋 Prerequisites
 
-- **OS**: Linux (Ubuntu/Debian recommended)
+- **OS**: Linux (Debian/Ubuntu, Fedora, CentOS/RHEL)
 - **Bash**: Version 5.0 or higher
-- **Packages**: `transmission-daemon`, `transmission-cli` (auto-installed)
+- **Packages**: `transmission-daemon`, `transmission-cli`, `dialog`, `git`, `curl` or `wget` (auto-installed by the installer)
 - **Optional**: `bc` for enhanced terminal animations
 
 ---
@@ -70,7 +68,7 @@ cd bits-downloader
 ### 2. Run the Main Application
 
 ```bash
-./bin/bits-downloader.sh
+./bin/bits-manager.sh
 ```
 
 The first run will launch an installation wizard that will:
@@ -87,27 +85,29 @@ The first run will launch an installation wizard that will:
 
 ```bash
 cd bits-downloader
-./bin/bits-downloader.sh
+./bin/bits-manager.sh
 ```
 
-### Main Menu Options
+You will see a splash screen followed by the dialog-based dashboard.
 
-1. **Start Torrent Manager** - Launch the background torrent service
-2. **Stop Torrent Manager** - Stop the torrent service
-3. **Monitor Downloads** - Real-time download monitoring
-4. **Control Panel** - Interactive torrent management
-5. **Add Torrent** - Add new torrents (magnet links, URLs, files)
-6. **View Logs** - Access system logs
-7. **Settings** - View current configuration
-0. **Exit** - Quit the application
+### Main Dashboard Options
+
+1. **Open Live Dashboard** - Launch the full-screen terminal dashboard (arrow keys to scroll)
+2. **Add a Torrent** - Add magnet/URL/.torrent file
+3. **View Details** - Inspect torrent status and stats
+4. **Start Manager** - Start transmission-daemon and the background manager
+5. **Stop Manager** - Pause all torrents and stop the daemon
+6. **Resume All** - Resume all torrents
+7. **Pause All** - Pause all torrents
+8. **Settings** - View current configuration and paths
 
 ### Adding Torrents
 
 There are several ways to add torrents:
 
 #### Method 1: Via Menu
-1. Run `./bin/bits-downloader.sh`
-2. Select option `5` (Add Torrent)
+1. Run `./bin/bits-manager.sh`
+2. Select **Add a new torrent**
 3. Enter magnet link, URL, or file path
 
 #### Method 2: Edit Torrent List
@@ -131,6 +131,7 @@ Place `.torrent` files in the `torrents/` directory
 
 ```bash
 ./ui/terminal_dashboard.sh
+# or choose **Open Live Dashboard** inside `./bin/bits-manager.sh`
 ```
 
 Features:
@@ -162,7 +163,8 @@ An impressive animated demo showing:
 ```
 bits-downloader/
 ├── bin/                          # Main executable scripts
-│   ├── bits-downloader.sh        # Main TUI application
+│   ├── bits-manager.sh           # Dialog-based main TUI (splash + dashboard)
+│   ├── bits-downloader.sh        # Legacy wrapper that forwards to bits-manager
 │   ├── start_torrents.sh         # Start torrent manager
 │   ├── stop_torrents.sh          # Stop torrent manager
 │   ├── monitor_torrents.sh       # Real-time monitor
@@ -226,7 +228,9 @@ cd ..
 rm -rf bits-downloader
 
 # Optional: Remove transmission (if no longer needed)
-sudo apt remove transmission-daemon transmission-cli
+sudo apt remove transmission-daemon transmission-cli transmission-common   # Debian/Ubuntu
+sudo dnf remove transmission-daemon transmission-cli dialog               # Fedora/RHEL/CentOS
+sudo yum remove transmission-daemon transmission-cli dialog               # Legacy RHEL/CentOS
 ```
 
 ---
@@ -249,7 +253,7 @@ To reconfigure, remove `.installed` and restart:
 
 ```bash
 rm .installed
-./bin/bits-downloader.sh
+./bin/bits-manager.sh
 ```
 
 ---
@@ -257,8 +261,6 @@ rm .installed
 ## 📊 Monitoring & Logs
 
 ### View Logs
-
-From the main menu, select option `6` or directly:
 
 ```bash
 # Main log
@@ -289,6 +291,7 @@ tail -f logs/torrent_manager.log
 ## 🎮 Keyboard Shortcuts
 
 ### Terminal Dashboard
+- `↑` / `↓` - Scroll through torrents
 - `q` / `Q` - Quit
 - `r` / `R` - Refresh
 - `s` / `S` - Start torrent manager
