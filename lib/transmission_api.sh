@@ -48,6 +48,15 @@ start_transmission() {
     is_transmission_running
 }
 
+# Ensure transmission is installed before attempting to control it
+ensure_transmission_available() {
+    if ! is_transmission_installed; then
+        log_error "transmission-daemon is required but not installed. Please install transmission-cli and transmission-daemon." || true
+        return 1
+    fi
+    return 0
+}
+
 # Stop transmission-daemon
 stop_transmission() {
     if is_transmission_running; then
@@ -191,6 +200,9 @@ get_torrent_field() {
             ;;
         peers|PEERS)
             echo "$info" | grep "^ *Peers:" | awk '{print $2}'
+            ;;
+        ratio|RATIO)
+            echo "$info" | grep "^ *Ratio:" | awk '{print $2}'
             ;;
         status|STATUS)
             echo "$info" | grep "^ *State:" | cut -d: -f2- | xargs

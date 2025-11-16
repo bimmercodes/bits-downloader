@@ -3,7 +3,8 @@
 # Torrent Manager - Main Background Service
 # Refactored with SOLID and DRY principles
 
-set -e
+set -euo pipefail
+IFS=$'\n\t'
 
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,6 +20,7 @@ readonly MAIN_LOG="$LOG_DIR/torrent_manager.log"
 
 # Ensure directories exist
 ensure_directories
+log_message "Ensured base directories exist"
 
 # Logging wrapper (DRY)
 log_message() {
@@ -135,6 +137,11 @@ monitor_torrents() {
 main() {
     # Setup
     trap cleanup EXIT INT TERM
+
+    if ! ensure_transmission_available; then
+        log_error "transmission-daemon is not installed. Aborting background manager startup." "$MAIN_LOG"
+        exit 1
+    fi
 
     # Check if already running
     check_already_running

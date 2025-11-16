@@ -3,7 +3,8 @@
 # BITS-DOWNLOADER - Uninstaller
 # Safely removes bits-downloader and cleans up all components
 
-set -e
+set -euo pipefail
+IFS=$'\n\t'
 
 # Colors
 RED='\033[0;31m'
@@ -19,6 +20,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$SCRIPT_DIR"
 PKG_MANAGER=""
 REMOVE_HINT=""
+KEEP_DOWNLOADS=false
+BASHRC_BACKUP_CREATED=false
+
+backup_bashrc_once() {
+    if [ "$BASHRC_BACKUP_CREATED" = false ] && [ -f "$HOME/.bashrc" ]; then
+        cp "$HOME/.bashrc" "$HOME/.bashrc.bits-backup"
+        BASHRC_BACKUP_CREATED=true
+    fi
+}
 
 detect_package_manager() {
     if command -v apt-get >/dev/null 2>&1; then
@@ -140,11 +150,19 @@ remove_launcher() {
     # Remove PATH entry from .bashrc
     if [ -f "$HOME/.bashrc" ]; then
         if grep -q "export PATH=\"\$HOME:\$PATH\"" "$HOME/.bashrc" 2>/dev/null; then
-            # Create backup
-            cp "$HOME/.bashrc" "$HOME/.bashrc.bits-backup"
-            # Remove the line
+            backup_bashrc_once
             sed -i '/export PATH="\$HOME:\$PATH"/d' "$HOME/.bashrc"
             echo -e "${GREEN}✓ Cleaned up .bashrc (backup created: ~/.bashrc.bits-backup)${NC}"
+        fi
+        if grep -q "bits-downloader/bin" "$HOME/.bashrc" 2>/dev/null; then
+            backup_bashrc_once
+            sed -i '/bits-downloader\/bin/d' "$HOME/.bashrc"
+            echo -e "${GREEN}✓ Removed bits-downloader bin PATH entry${NC}"
+        fi
+        if grep -q "alias bits=" "$HOME/.bashrc" 2>/dev/null; then
+            backup_bashrc_once
+            sed -i '/alias bits=/d' "$HOME/.bashrc"
+            echo -e "${GREEN}✓ Removed bits alias from .bashrc${NC}"
         fi
     fi
 

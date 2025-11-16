@@ -41,16 +41,23 @@ show_splash() {
 start_manager() {
     ensure_setup
 
+    if ! ensure_transmission_available; then
+        "$DIALOG_BIN" --title "Missing dependency" --msgbox "transmission-daemon is required. Please install transmission-cli/transmission-daemon packages and try again." 8 70
+        return
+    fi
+
     if pgrep -f "torrent_manager.sh" >/dev/null 2>&1; then
         "$DIALOG_BIN" --title "Already Running" --msgbox "Torrent manager is already running." 6 50
         return
     fi
 
-    if start_transmission "$DOWNLOAD_DIR" "$DOWNLOAD_DIR/.incomplete" "$LOG_DIR/transmission.log"; then
-        nohup "$PROJECT_ROOT/lib/torrent_manager.sh" > "$LOG_DIR/nohup.log" 2>&1 &
-        "$DIALOG_BIN" --title "Started" --msgbox "Transmission daemon and torrent manager are now running." 7 60
+    nohup "$PROJECT_ROOT/lib/torrent_manager.sh" > "$LOG_DIR/nohup.log" 2>&1 &
+    sleep 2
+
+    if pgrep -f "torrent_manager.sh" >/dev/null 2>&1; then
+        "$DIALOG_BIN" --title "Started" --msgbox "Torrent manager is now running. Transmission will be started automatically if needed." 8 70
     else
-        "$DIALOG_BIN" --title "Error" --msgbox "Failed to start transmission-daemon. Check logs in $LOG_DIR." 7 60
+        "$DIALOG_BIN" --title "Error" --msgbox "Failed to start torrent manager. Check $LOG_DIR/nohup.log for details." 8 70
     fi
 }
 

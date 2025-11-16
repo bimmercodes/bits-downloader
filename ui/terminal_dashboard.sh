@@ -27,12 +27,6 @@ REFRESH_TORRENTS=1
 declare -a TORRENT_CACHE=()
 HEADER_LINE=""
 
-# Get terminal dimensions
-get_terminal_size() {
-    TERM_HEIGHT=$(tput lines)
-    TERM_WIDTH=$(tput cols)
-}
-
 # Draw box with title
 draw_box() {
     local title="$1"

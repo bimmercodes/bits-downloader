@@ -3,7 +3,8 @@
 # BITS-DOWNLOADER - One-Line Installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/bimmercodes/bits-downloader/main/install.sh | bash
 
-set -e
+set -euo pipefail
+IFS=$'\n\t'
 
 # Colors
 RED='\033[0;31m'
@@ -111,6 +112,12 @@ check_requirements() {
         echo -e "${GREEN}✓ dialog is installed${NC}"
     fi
 
+    # Check bc (used for byte/unit formatting in dashboards)
+    if ! command -v bc >/dev/null 2>&1; then
+        echo -e "${YELLOW}Installing bc...${NC}"
+        install_packages bc
+    fi
+
     echo ""
 }
 
@@ -206,9 +213,21 @@ LAUNCHER
 
     chmod +x "$HOME/bits"
 
-    # Try to add to PATH via .bashrc if not already there
-    if ! grep -q "export PATH=\"\$HOME:\$PATH\"" "$HOME/.bashrc" 2>/dev/null; then
-        echo 'export PATH="$HOME:$PATH"' >> "$HOME/.bashrc"
+    # Add a friendly alias instead of mutating PATH
+    if ! grep -q "alias bits=" "$HOME/.bashrc" 2>/dev/null; then
+        {
+            echo ''
+            echo '# Added by bits-downloader installer'
+            echo "alias bits=\"$HOME/bits\""
+        } >> "$HOME/.bashrc"
+    fi
+
+    # Ensure bin directory is on PATH for direct use of bits-downloader.sh
+    if ! grep -q "bits-downloader/bin" "$HOME/.bashrc" 2>/dev/null; then
+        {
+            echo '# Added by bits-downloader installer'
+            echo "export PATH=\"$INSTALL_DIR/bin:\\\$PATH\""
+        } >> "$HOME/.bashrc"
     fi
 
     echo -e "${GREEN}✓ Launcher created: ~/bits${NC}"

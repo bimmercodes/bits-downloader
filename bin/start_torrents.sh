@@ -10,9 +10,16 @@ PROJECT_ROOT="$(cd "$BIN_DIR/.." && pwd)"
 # Source libraries
 source "$PROJECT_ROOT/lib/config.sh"
 source "$PROJECT_ROOT/lib/utils.sh"
+source "$PROJECT_ROOT/lib/transmission_api.sh"
 
 # Ensure directories exist
 ensure_directories
+
+# Ensure dependency exists before attempting to start
+if ! ensure_transmission_available; then
+    print_error "transmission-daemon is required. Install transmission-cli and transmission-daemon first."
+    exit 1
+fi
 
 # Check if already running
 if pgrep -f "torrent_manager.sh" > /dev/null; then
