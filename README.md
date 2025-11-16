@@ -18,11 +18,11 @@ Lightweight, dialog-driven BitTorrent manager built on `transmission-daemon`, wi
 
 ## Installation
 
-### One-liner (recommended)
+### One-liner (recommended) with curl
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bimmercodes/bits-downloader/refs/heads/master/install.sh | bash
 ```
-# or
+### or with wget
 ```bash
 wget -qO- https://raw.githubusercontent.com/bimmercodes/bits-downloader/refs/heads/master/install.sh | bash
 ```
