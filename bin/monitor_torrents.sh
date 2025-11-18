@@ -32,10 +32,32 @@ show_detailed_info() {
     print_separator "=" 65
     echo ""
 
-    if get_torrent_info "$id"; then
-        echo ""
-    else
+    local name=$(get_torrent_field "$id" "name")
+    local size=$(get_torrent_field "$id" "size")
+    local downloaded=$(get_torrent_field "$id" "downloaded")
+    local percent=$(get_torrent_field "$id" "percent")
+    local status=$(get_torrent_field "$id" "status")
+    local eta=$(get_torrent_field "$id" "eta")
+    local download_speed=$(get_torrent_field "$id" "download_speed")
+    local upload_speed=$(get_torrent_field "$id" "upload_speed")
+    local peers=$(get_torrent_field "$id" "peers")
+    local location=$(get_torrent_field "$id" "location")
+
+    if [ -z "$name" ]; then
         print_error "Invalid torrent ID or torrent not found"
+    else
+        echo -e "${COLORS[CYAN]}Name:${COLORS[RESET]} $name"
+        echo -e "${COLORS[CYAN]}Size:${COLORS[RESET]} $size"
+        echo -e "${COLORS[CYAN]}Downloaded:${COLORS[RESET]} $downloaded ($percent)"
+        echo -e "${COLORS[CYAN]}Status:${COLORS[RESET]} $status"
+        echo -e "${COLORS[CYAN]}ETA:${COLORS[RESET]} $eta"
+        echo -e "${COLORS[CYAN]}Speeds:${COLORS[RESET]} ↓ $download_speed  ↑ $upload_speed"
+        echo -e "${COLORS[CYAN]}Peers:${COLORS[RESET]} $peers"
+        echo -e "${COLORS[CYAN]}Location:${COLORS[RESET]} $location"
+        
+        echo ""
+        echo -e "${COLORS[CYAN]}Files:${COLORS[RESET]}"
+        get_torrent_files "$id" | tail -n +2
     fi
 
     echo ""

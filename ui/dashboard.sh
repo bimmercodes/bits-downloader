@@ -50,6 +50,20 @@ get_terminal_size() {
     TERM_WIDTH=$(tput cols)
 }
 
+# Center a line within the dialog width while ignoring dialog color codes
+center_menu_line() {
+    local line="$1"
+    local width=$((TERM_WIDTH - 4))
+    (( width < 20 )) && width=$TERM_WIDTH
+
+    # Remove \Z color tokens when calculating padding
+    local plain=$(echo -n "$line" | sed 's/\\Z[0-7A-Za-z]//g')
+    local padding=$(( (width - ${#plain}) / 2 ))
+    (( padding < 0 )) && padding=0
+
+    printf "%${padding}s%s" "" "$line"
+}
+
 # ============================================================================
 # TORRENT DATA
 # ============================================================================
@@ -227,6 +241,8 @@ action_show_details() {
 
     dialog --title "Torrent #$id Details" \
            --msgbox "$details" 22 75
+
+    # Ensure we return to the main menu even if cancelled
 }
 
 action_start_all() {
@@ -277,15 +293,15 @@ main_loop() {
         # Get terminal size
         get_terminal_size
 
-        # Show dashboard and capture key
+        # Show main menu and capture key
         dialog --colors \
                --no-shadow \
                --no-collapse \
                --timeout 1 \
-               --title " BITS Downloader Dashboard " \
-               --extra-button --extra-label "Refresh" \
-               --ok-label "Action Menu" \
-               --cancel-label "Quit" \
+               --title " BITS Downloader Main Menu " \
+                --extra-button --extra-label "Refresh" \
+                --ok-label "Action Menu" \
+                --cancel-label "Quit" \
                --msgbox "$(build_dashboard_content)" \
                $TERM_HEIGHT $TERM_WIDTH 2> "$DIALOG_TEMP"
 
@@ -319,29 +335,27 @@ build_dashboard_content() {
     local torrent_count=${#TORRENT_IDS[@]}
     local content=""
 
-    content+="\n\Zb\Z4═══════════════════════════════════════════════════════════════════════════════\Zn\n"
-    content+="  \Zb\Z6BITS DOWNLOADER\Zn - Interactive Torrent Manager\n"
-    content+="\Zb\Z4═══════════════════════════════════════════════════════════════════════════════\Zn\n\n"
+    content+="$(center_menu_line "\Zb\Z4═══════════════════════════════════════════════════════════════════════════════\Zn")\n"
+    content+="$(center_menu_line "  \Zb\Z6BITS DOWNLOADER\Zn - Main Menu")\n"
+    content+="$(center_menu_line "\Zb\Z4═══════════════════════════════════════════════════════════════════════════════\Zn")\n\n"
 
-    content+="  Status: ${status_color}\Zb${status}\Zn  |  "
-    content+="Torrents: \Zb\Z3${torrent_count}\Zn  |  "
-    content+="Auto-refresh: "
+    local status_line="  Status: ${status_color}\Zb${status}\Zn  |  Torrents: \Zb\Z3${torrent_count}\Zn  |  Auto-refresh: "
     if [ $AUTO_REFRESH -eq 1 ]; then
-        content+="\Z2ON\Zn (${REFRESH_INTERVAL}s)"
+        status_line+="\Z2ON\Zn (${REFRESH_INTERVAL}s)"
     else
-        content+="\Z1OFF\Zn"
+        status_line+="\Z1OFF\Zn"
     fi
-    content+="\n\n"
+    content+="$(center_menu_line "$status_line")\n\n"
 
-    content+="\Zb\Z4┌──────┬────────────────────────────────────────┬────────────┬─────────┬──────────┐\Zn\n"
-    content+="\Zb\Z4│\Zn \ZbID\Zn   \Zb\Z4│\Zn \ZbNAME\Zn                                   \Zb\Z4│\Zn \ZbSIZE\Zn       \Zb\Z4│\Zn \ZbDONE\Zn    \Zb\Z4│\Zn \ZbSTATUS\Zn   \Zb\Z4│\Zn\n"
-    content+="\Zb\Z4├──────┼────────────────────────────────────────┼────────────┼─────────┼──────────┤\Zn\n"
+    content+="$(center_menu_line "\Zb\Z4┌──────┬────────────────────────────────────────┬────────────┬─────────┬──────────┐\Zn")\n"
+    content+="$(center_menu_line "\Zb\Z4│\Zn \ZbID\Zn   \Zb\Z4│\Zn \ZbNAME\Zn                                   \Zb\Z4│\Zn \ZbSIZE\Zn       \Zb\Z4│\Zn \ZbDONE\Zn    \Zb\Z4│\Zn \ZbSTATUS\Zn   \Zb\Z4│\Zn")\n"
+    content+="$(center_menu_line "\Zb\Z4├──────┼────────────────────────────────────────┼────────────┼─────────┼──────────┤\Zn")\n"
 
     if [ ${#TORRENT_IDS[@]} -eq 0 ]; then
-        content+="\Zb\Z4│\Zn                                                                             \Zb\Z4│\Zn\n"
-        content+="\Zb\Z4│\Zn                    \Z3No torrents available\Zn                                \Zb\Z4│\Zn\n"
-        content+="\Zb\Z4│\Zn                Click 'Action Menu' to add a torrent                          \Zb\Z4│\Zn\n"
-        content+="\Zb\Z4│\Zn                                                                             \Zb\Z4│\Zn\n"
+        content+="$(center_menu_line "\Zb\Z4│\Zn                                                                             \Zb\Z4│\Zn")\n"
+        content+="$(center_menu_line "\Zb\Z4│\Zn                    \Z3No torrents available\Zn                                \Zb\Z4│\Zn")\n"
+        content+="$(center_menu_line "\Zb\Z4│\Zn                Click 'Action Menu' to add a torrent                          \Zb\Z4│\Zn")\n"
+        content+="$(center_menu_line "\Zb\Z4│\Zn                                                                             \Zb\Z4│\Zn")\n"
     else
         local max_display=10
         local start_idx=0
@@ -374,42 +388,35 @@ build_dashboard_content() {
                 status_color="\Z1"
             fi
 
+            local row_prefix=""
+            local row_suffix=""
             if [ $i -eq $SELECTED_ROW ]; then
-                content+="\Zb\Z7\Zr"
+                row_prefix="\Zb\Z7\Zr"
+                row_suffix="\ZR"
             fi
 
-            content+="\Zb\Z4│\Zn "
             printf -v id_str "%-5s" "$id"
-            content+="${id_str} \Zb\Z4│\Zn "
             printf -v name_str "%-38s" "$name"
-            content+="${name_str} \Zb\Z4│\Zn "
             printf -v size_str "%-10s" "$size"
-            content+="${size_str} \Zb\Z4│\Zn "
-            content+="${done_color}"
             printf -v done_str "%-7s" "$done"
-            content+="${done_str}\Zn \Zb\Z4│\Zn "
-            content+="${status_color}"
             printf -v status_str "%-8s" "$status"
-            content+="${status_str}\Zn \Zb\Z4│\Zn"
 
-            if [ $i -eq $SELECTED_ROW ]; then
-                content+="\ZR"
-            fi
+            local row="${row_prefix}\Zb\Z4│\Zn ${id_str} \Zb\Z4│\Zn ${name_str} \Zb\Z4│\Zn ${size_str} \Zb\Z4│\Zn ${done_color}${done_str}\Zn \Zb\Z4│\Zn ${status_color}${status_str}\Zn \Zb\Z4│\Zn${row_suffix}"
+            content+="$(center_menu_line "$row")\n"
 
-            content+="\n"
             ((displayed++))
         done
 
         for ((j=displayed; j<max_display; j++)); do
-            content+="\Zb\Z4│\Zn      \Zb\Z4│\Zn                                        \Zb\Z4│\Zn            \Zb\Z4│\Zn         \Zb\Z4│\Zn          \Zb\Z4│\Zn\n"
+            content+="$(center_menu_line "\Zb\Z4│\Zn      \Zb\Z4│\Zn                                        \Zb\Z4│\Zn            \Zb\Z4│\Zn         \Zb\Z4│\Zn          \Zb\Z4│\Zn")\n"
         done
     fi
 
-    content+="\Zb\Z4└──────┴────────────────────────────────────────┴────────────┴─────────┴──────────┘\Zn\n\n"
+    content+="$(center_menu_line "\Zb\Z4└──────┴────────────────────────────────────────┴────────────┴─────────┴──────────┘\Zn")\n\n"
 
-    content+="\Zb\Z4═══════════════════════════════════════════════════════════════════════════════\Zn\n"
-    content+="  Click \Zb'Action Menu'\Zn for torrent operations  •  Click \Zb'Refresh'\Zn to update  •  \Zb'Quit'\Zn to exit\n"
-    content+="\Zb\Z4═══════════════════════════════════════════════════════════════════════════════\Zn"
+    content+="$(center_menu_line "\Zb\Z4═══════════════════════════════════════════════════════════════════════════════\Zn")\n"
+    content+="$(center_menu_line "  Click \Zb'Action Menu'\Zn for torrent operations  •  Click \Zb'Refresh'\Zn to update  •  \Zb'Quit'\Zn to exit")\n"
+    content+="$(center_menu_line "\Zb\Z4═══════════════════════════════════════════════════════════════════════════════\Zn")"
 
     echo "$content"
 }
@@ -445,7 +452,6 @@ show_action_menu() {
         local choice=$(cat "$DIALOG_TEMP")
         handle_action $choice
     fi
-    clear
 }
 
 handle_action() {
@@ -491,7 +497,6 @@ show_select_torrent() {
     if [ $? -eq 0 ]; then
         SELECTED_ROW=$(cat "$DIALOG_TEMP")
     fi
-    clear
 }
 
 # ============================================================================

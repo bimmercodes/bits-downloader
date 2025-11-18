@@ -201,9 +201,9 @@ main_menu() {
         status_text=$(menu_label_status)
 
         local choice
-        choice=$(dialog_cmd --stdout --clear --backtitle "BITS Downloader" --title "Main Dashboard" \
+        choice=$(dialog_cmd --stdout --clear --backtitle "BITS Downloader" --title "Main Menu" \
             --menu "$status_text\n\nUse arrow keys to navigate and Enter to select." 20 80 10 \
-            dashboard "Open live dashboard (tput UI)" \
+            dashboard "Open live dashboard (Active Torrents UI)" \
             add "Add a new torrent (magnet/URL/file)" \
             details "View torrent details" \
             start "Start transmission + manager" \

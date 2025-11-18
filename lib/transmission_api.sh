@@ -78,6 +78,12 @@ get_torrent_info() {
     transmission-remote -t "$id" -i 2>/dev/null
 }
 
+# Get torrent files by ID
+get_torrent_files() {
+    local id="$1"
+    transmission-remote -t "$id" -f 2>/dev/null
+}
+
 # Get session stats
 get_session_stats() {
     transmission-remote -st 2>/dev/null

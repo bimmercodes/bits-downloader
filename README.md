@@ -1,83 +1,121 @@
-# BITS-DOWNLOADER
+<p align="center">
+  <img src="https://raw.githubusercontent.com/bimmercodes/bits-downloader/main/assets/logo.png" alt="bits-downloader logo" width="150">
+</p>
 
-Lightweight, dialog-driven BitTorrent manager built on `transmission-daemon`, with a live terminal dashboard, queue tools, and sensible defaults for Linux servers.
+<h1 align="center">BITS Downloader</h1>
+
+<p align="center">
+  <strong>Lightweight, dialog-driven BitTorrent manager for Linux servers.</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/github/last-commit/bimmercodes/bits-downloader" alt="last commit">
+  <img src="https://img.shields.io/github/license/bimmercodes/bits-downloader" alt="license">
+</p>
+
+BITS Downloader is a set of Bash scripts that provide a user-friendly interface for managing `transmission-daemon`. It's designed to be simple, efficient, and easy to use on a headless server.
 
 ## Features
-- Dialog menus for adding torrents, viewing details, and starting/stopping the manager
-- Full-screen dashboard with scrolling, stats, and keyboard shortcuts
-- Background torrent manager that auto-loads magnet links, URLs, and `.torrent` files
-- Centralized logging (`logs/`) and status snapshots for quick inspection
-- Cross-distro install script (apt/dnf/yum) plus manual setup path
-- Single shared library set for colors, config, and Transmission helpers (DRY/SOLID)
 
-## Requirements
+- **TUI:** A dialog-based terminal user interface for easy management.
+- **Live Dashboard:** A full-screen, real-time dashboard to monitor your torrents.
+- **Automation:** A background service that automatically adds torrents from a file or a directory.
+- **Flexible:** Add torrents via magnet links, URLs, or `.torrent` files.
+- **Configurable:** Easily change the default directories for torrents, downloads, and logs.
+- **Cross-distro:** Works on most Linux distributions (tested on Debian, Ubuntu, Fedora, and CentOS).
+
+## Prerequisites
+
 - Linux with Bash 5+
 - `transmission-daemon` and `transmission-cli`
 - `dialog`, `git`, and `curl` or `wget`
-- Optional: `bc` for byte formatting on some dashboards
+- `bc` (for byte formatting in dashboards)
 
 ## Installation
 
-### One-liner (recommended) with curl
+You can install BITS Downloader with a single command:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bimmercodes/bits-downloader/refs/heads/master/install.sh | bash
-```
-### or with wget
-```bash
-wget -qO- https://raw.githubusercontent.com/bimmercodes/bits-downloader/refs/heads/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/bimmercodes/bits-downloader/main/install.sh | bash
 ```
 
-The installer clones to `~/bits-downloader`, ensures dependencies, makes scripts executable, and drops a `~/bits` helper with an `alias bits=...` entry in your `~/.bashrc`.
-
-### Manual
-```bash
-git clone https://github.com/bimmercodes/bits-downloader.git
-cd bits-downloader
-chmod +x bin/*.sh lib/*.sh ui/*.sh
-./bin/bits-manager.sh
-```
+This will clone the repository to `~/bits-downloader`, install the dependencies, and create a launcher at `~/bits`.
 
 ## Usage
-- Launch the UI: `~/bits` (after installer) or `./bin/bits-manager.sh`
-- Key actions from the menu: open live dashboard, add torrent, view details, start/stop/resume/pause all torrents, and view current paths/status.
-- Quick scripts if you prefer CLI:
-  - Start service: `./bin/start_torrents.sh`
-  - Stop service: `./bin/stop_torrents.sh`
-  - Classic monitor: `./bin/monitor_torrents.sh`
 
-### Adding torrents
-- From the menu: choose **Add a new torrent** and paste a magnet link, URL, or file path.
-- Queue file: append to `data/torrent_list.txt` (one entry per line).
-- Drop files: place `.torrent` files in `torrents/` (auto-moved to `torrents/added` after ingestion).
+To start the application, run the `bits` command in your terminal:
 
-### Live dashboards
-- Full-screen view: `./ui/terminal_dashboard.sh` (arrow keys to scroll, `r` refresh, `q` quit, `s` start manager, `t/p` pause, `u` resume).
-- Dialog-free monitor: `./bin/monitor_torrents.sh` for a text summary with quick detail view.
+```bash
+bits
+```
+
+This will open the main menu, where you can:
+
+- Open the live dashboard
+- Add a new torrent
+- View torrent details
+- Start/stop the torrent manager
+- Resume/pause all torrents
+- View current settings
+
+### Adding Torrents
+
+There are two ways to add torrents:
+
+1.  **From the TUI:** Select the "Add a new torrent" option and paste a magnet link, URL, or file path.
+2.  **Automatically:**
+    - Add magnet links or URLs to the `data/torrent_list.txt` file (one per line).
+    - Place `.torrent` files in the `torrents/` directory.
+
+The background manager will automatically pick them up and start downloading.
 
 ## Configuration
-- Settings live in `.config` at the project root:
-  - `TORRENT_DIR` (default: `./torrents`)
-  - `DOWNLOAD_DIR` (default: `./downloads`)
-  - `LOG_DIR` (default: `./logs`)
-  - `TORRENT_LIST` (default: `./data/torrent_list.txt`)
-- Update values in `.config` and restart the manager. Directories are auto-created on start.
 
-## Logs and troubleshooting
-- Main manager log: `logs/torrent_manager.log`
-- Transmission log: `logs/transmission.log`
-- Recent completions: `logs/completed.log`
-- Current status snapshot: `logs/current_status.txt`
+The configuration is stored in the `.config` file in the project root. You can change the following settings:
 
-Quick checks:
-```bash
-transmission-remote -l          # verify daemon connectivity
-tail -f logs/torrent_manager.log # live manager log
-chmod +x bin/*.sh lib/*.sh ui/*.sh # fix permissions if needed
+- `TORRENT_DIR`: The directory where `.torrent` files are stored.
+- `DOWNLOAD_DIR`: The directory where the downloaded files are stored.
+- `LOG_DIR`: The directory where the logs are stored.
+- `TORRENT_LIST`: The path to the file containing the list of torrents to download.
+
+## Project Structure
+
+```
+.
+├── bin/                # Main executable scripts
+│   ├── bits-downloader.sh
+│   ├── bits-manager.sh
+│   └── ...
+├── data/               # Data files
+│   └── torrent_list.txt.example
+├── downloads/          # Default download directory
+├── install/            # Installation scripts for different distros
+├── lib/                # Helper scripts and libraries
+│   ├── config.sh
+│   ├── transmission_api.sh
+│   └── ...
+├── logs/               # Log files
+├── torrents/           # Default torrents directory
+│   └── added/
+├── ui/                 # User interface scripts
+│   ├── dashboard.sh
+│   └── ...
+├── .gitignore
+├── install.sh
+├── README.md
+└── uninstall.sh
 ```
 
-## Uninstall
-```bash
-cd ~/bits-downloader
-./uninstall.sh
-```
-Stops services, removes the install directory, cleans the `~/bits` helper and alias, and offers to keep your downloads. Transmission packages remain installed unless you remove them yourself.
+## Contributing
+
+Contributions are welcome! If you have any ideas, suggestions, or bug reports, please open an issue or submit a pull request.
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+---
+
+<p align="center">
+  <a href="#top">Back to top</a>
+</p>
