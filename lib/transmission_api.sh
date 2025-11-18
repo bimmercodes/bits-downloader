@@ -33,12 +33,10 @@ start_transmission() {
         --download-dir "$download_dir" \
         --incomplete-dir "$incomplete_dir" \
         --logfile "$log_file" \
-        --log-level=2 \
+        --log-level=info \
         --encryption-preferred \
-        --peer-limit-global=200 \
-        --peer-limit-per-torrent=50 \
-        --download-queue-size=10 \
-        --seed-queue-size=10 \
+        --peerlimit-global 200 \
+        --peerlimit-torrent 50 \
         --no-auth \
         --allowed "127.0.0.1" \
         --port 9091
@@ -125,6 +123,17 @@ start_torrent() {
 stop_torrent() {
     local id="${1:-all}"
     transmission-remote -t "$id" -S &>/dev/null
+}
+
+# Force start / boost a torrent by bypassing session limits, raising bandwidth priority,
+# reannouncing to trackers, and starting it.
+force_start_torrent() {
+    local id="${1:-all}"
+
+    # Start first to ensure torrent is active, then lift caps and reannounce.
+    transmission-remote -t "$id" -s --no-honor-session &>/dev/null
+    transmission-remote -t "$id" -Bh &>/dev/null
+    transmission-remote -t "$id" --reannounce &>/dev/null
 }
 
 # Verify torrent

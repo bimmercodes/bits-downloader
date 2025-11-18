@@ -18,14 +18,14 @@ source "$SCRIPT_DIR/transmission_api.sh"
 readonly PID_FILE="/tmp/torrent_manager.pid"
 readonly MAIN_LOG="$LOG_DIR/torrent_manager.log"
 
-# Ensure directories exist
-ensure_directories
-log_message "Ensured base directories exist"
-
 # Logging wrapper (DRY)
 log_message() {
     log_info "$1" "$MAIN_LOG"
 }
+
+# Ensure directories exist
+ensure_directories
+log_message "Ensured base directories exist"
 
 # Check if already running (Single Responsibility)
 check_already_running() {

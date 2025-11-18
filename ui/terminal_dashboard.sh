@@ -19,6 +19,8 @@ NEED_REDRAW=1
 RUNNING=1
 FIRST_DRAW=1
 LAST_REFRESH=0
+CONTENT_DIRTY=0
+FOOTER_DIRTY=1
 SCROLL_OFFSET=0
 TORRENT_TOTAL_LINES=0
 TORRENT_VIEW_HEIGHT=0
@@ -26,16 +28,18 @@ SELECTED_INDEX=0
 REFRESH_TORRENTS=1
 declare -a TORRENT_CACHE=()
 declare -a DETAIL_LINES=()
+declare -a WRAPPED_DETAIL_LINES=()
+declare -A TORRENT_INFO_CACHE=()
+declare -A TORRENT_SIZE_CACHE=()
 HEADER_LINE=""
 
 # Layout state
-MAIN_Y=3
+MAIN_Y=1
 MAIN_HEIGHT=0
-STATS_Y=0
-STATS_HEIGHT=4
 LIST_BOX_X=1
 LIST_BOX_WIDTH=0
 LIST_BOX_HEIGHT=0
+DETAIL_BOX_Y=0
 DETAIL_BOX_X=0
 DETAIL_BOX_WIDTH=0
 DETAIL_BOX_HEIGHT=0
@@ -44,6 +48,22 @@ DETAIL_BOX_HEIGHT=0
 ACTIVE_PANE="list"   # list | details
 DETAIL_SCROLL_OFFSET=0
 ORIG_STTY=""
+
+# Trim text to fit a width with ellipsis
+trim_text() {
+    local text="$1"
+    local max_width="$2"
+    if [ -z "$max_width" ] || [ "$max_width" -le 3 ]; then
+        echo "$text"
+        return
+    fi
+    local length=${#text}
+    if [ "$length" -le "$max_width" ]; then
+        echo "$text"
+    else
+        echo "${text:0:$((max_width-3))}..."
+    fi
+}
 
 # Extract raw byte count from a transmission info line like "(1,234 bytes)"
 extract_bytes_from_line() {
@@ -54,16 +74,71 @@ extract_bytes_from_line() {
     fi
 }
 
+# Get and cache torrent info by id
+get_cached_info() {
+    local id="$1"
+    local info="${TORRENT_INFO_CACHE[$id]}"
+    if [ -z "$info" ]; then
+        info="$(get_torrent_info "$id")"
+        TORRENT_INFO_CACHE["$id"]="$info"
+    fi
+    echo "$info"
+}
+
+# Compute on-disk size (cached) using location/name from info
+compute_ondisk_size() {
+    local id="$1"
+    local info="$2"
+    local cached="${TORRENT_SIZE_CACHE[$id]}"
+    [ -n "$cached" ] && { echo "$cached"; return; }
+
+    local name location ondisk="N/A"
+    name=$(echo "$info" | awk '/^ *Name:/ {sub(/^[^:]*: */,""); print}')
+    location=$(echo "$info" | awk '/^ *Location:/ {sub(/^[^:]*: */,""); print}')
+
+    if [ -n "$location" ]; then
+        local target="$location"
+        if [ -n "$name" ] && [ -e "$location/.incomplete/$name" ]; then
+            target="$location/.incomplete/$name"
+        elif [ -n "$name" ] && [ -e "$location/$name" ]; then
+            target="$location/$name"
+        fi
+        local size_bytes=$(du -sb "$target" 2>/dev/null | awk '{print $1}')
+        if [ -n "$size_bytes" ]; then
+            if command -v numfmt >/dev/null 2>&1; then
+                ondisk=$(numfmt --to=iec-i "$size_bytes")
+            else
+                ondisk=$(format_bytes "$size_bytes")
+            fi
+        fi
+    fi
+
+    if [ "$ondisk" = "N/A" ]; then
+        local have_bytes=$(extract_bytes_from_line "$(echo "$info" | grep "^ *Have:")")
+        if [ -n "$have_bytes" ]; then
+            if command -v numfmt >/dev/null 2>&1; then
+                ondisk=$(numfmt --to=iec-i "$have_bytes")
+            else
+                ondisk=$(format_bytes "$have_bytes")
+            fi
+        fi
+    fi
+
+    TORRENT_SIZE_CACHE["$id"]="$ondisk"
+    echo "$ondisk"
+}
+
 # Format a torrent row showing on-disk size instead of "Done"
 format_torrent_row() {
     local raw_line="$1"
     local width="$2"
     local provided_info="${3:-}"
+    local provided_size="${4:-}"
 
     local id=$(echo "$raw_line" | awk '{print $1}' | tr -d '*')
     local info="$provided_info"
     if [ -z "$info" ]; then
-        info="$(get_torrent_info "$id")"
+        info="$(get_cached_info "$id")"
     fi
     if [ -z "$info" ]; then
         printf "%-${width}s" "N/A"
@@ -113,17 +188,21 @@ format_torrent_row() {
     local col_down_width=10
     local col_up_width=10
     local col_status_width=10
-    local name_width=$((width - col_id_width - col_size_width - col_down_width - col_up_width - col_status_width - 5))
+    local col_percent_width=7
+
+    local fixed_total=$((col_id_width + col_size_width + col_down_width + col_up_width + col_status_width + col_percent_width + 5))
+    local name_width=$((width - fixed_total))
     (( name_width < 5 )) && name_width=5
 
     local display_name="${name:0:$name_width}"
 
-    printf "%-*s %-*s %-*s %-*s %-*s %s" \
+    printf "%-*s %-*s %-*s %-*s %-*s %-*s %s" \
         "$col_id_width" "$id" \
         "$col_size_width" "$ondisk" \
         "$col_down_width" "${down:-0}" \
         "$col_up_width" "${up:-0}" \
         "$col_status_width" "${status:0:$col_status_width}" \
+        "$col_percent_width" "${percent:-N/A}" \
         "$display_name"
 }
 
@@ -132,46 +211,40 @@ compute_layout() {
     local footer_height=2
     local available=$((TERM_HEIGHT - MAIN_Y - footer_height))
 
-    # Adapt stats height based on available space
-    if [ $available -lt 8 ]; then
-        STATS_HEIGHT=3
-    elif [ $available -lt 12 ]; then
-        STATS_HEIGHT=3
-    else
-        STATS_HEIGHT=4
-    fi
-
-    MAIN_HEIGHT=$((available - STATS_HEIGHT))
+    MAIN_HEIGHT=$available
     [ $MAIN_HEIGHT -lt 6 ] && MAIN_HEIGHT=6
 
     # Ensure we never exceed terminal bounds
-    local total_needed=$((MAIN_Y + MAIN_HEIGHT + STATS_HEIGHT + footer_height))
+    local total_needed=$((MAIN_Y + MAIN_HEIGHT + footer_height))
     if [ $total_needed -gt $TERM_HEIGHT ]; then
-        MAIN_HEIGHT=$((TERM_HEIGHT - MAIN_Y - STATS_HEIGHT - footer_height))
+        MAIN_HEIGHT=$((TERM_HEIGHT - MAIN_Y - footer_height))
         [ $MAIN_HEIGHT -lt 3 ] && MAIN_HEIGHT=3
     fi
 
-    STATS_Y=$((MAIN_Y + MAIN_HEIGHT))
-
+    # Stack list above details, both full width
     LIST_BOX_X=1
-    local spacing=1
-    LIST_BOX_WIDTH=$(( (TERM_WIDTH - 3) * 3 / 5 ))
-    (( LIST_BOX_WIDTH < 20 )) && LIST_BOX_WIDTH=$((TERM_WIDTH/2 - 2))
-    (( LIST_BOX_WIDTH < 18 )) && LIST_BOX_WIDTH=18
+    DETAIL_BOX_X=1
+    local vertical_spacing=1
+    LIST_BOX_WIDTH=$((TERM_WIDTH - 2))
+    [ $LIST_BOX_WIDTH -lt 18 ] && LIST_BOX_WIDTH=18
+    DETAIL_BOX_WIDTH=$LIST_BOX_WIDTH
 
-    DETAIL_BOX_X=$((LIST_BOX_X + LIST_BOX_WIDTH + spacing))
-    DETAIL_BOX_WIDTH=$((TERM_WIDTH - DETAIL_BOX_X - 1))
+    LIST_BOX_HEIGHT=$((MAIN_HEIGHT * 2 / 3))
+    [ $LIST_BOX_HEIGHT -lt 6 ] && LIST_BOX_HEIGHT=6
+    DETAIL_BOX_HEIGHT=$((MAIN_HEIGHT - LIST_BOX_HEIGHT - vertical_spacing))
+    [ $DETAIL_BOX_HEIGHT -lt 3 ] && DETAIL_BOX_HEIGHT=3
 
-    if [ $DETAIL_BOX_WIDTH -lt 24 ]; then
-        DETAIL_BOX_WIDTH=$((TERM_WIDTH - LIST_BOX_X - 3))
-        [ $DETAIL_BOX_WIDTH -lt 18 ] && DETAIL_BOX_WIDTH=18
-        LIST_BOX_WIDTH=$((TERM_WIDTH - DETAIL_BOX_WIDTH - spacing - 1))
-        [ $LIST_BOX_WIDTH -lt 18 ] && LIST_BOX_WIDTH=18
-        DETAIL_BOX_X=$((LIST_BOX_X + LIST_BOX_WIDTH + spacing))
+    # Ensure stacked boxes fit within MAIN_HEIGHT
+    if [ $((LIST_BOX_HEIGHT + DETAIL_BOX_HEIGHT + vertical_spacing)) -gt $MAIN_HEIGHT ]; then
+        DETAIL_BOX_HEIGHT=$((MAIN_HEIGHT - vertical_spacing - LIST_BOX_HEIGHT))
+        [ $DETAIL_BOX_HEIGHT -lt 3 ] && DETAIL_BOX_HEIGHT=3
+        if [ $((LIST_BOX_HEIGHT + DETAIL_BOX_HEIGHT + vertical_spacing)) -gt $MAIN_HEIGHT ]; then
+            LIST_BOX_HEIGHT=$((MAIN_HEIGHT - vertical_spacing - DETAIL_BOX_HEIGHT))
+            [ $LIST_BOX_HEIGHT -lt 3 ] && LIST_BOX_HEIGHT=3
+        fi
     fi
 
-    LIST_BOX_HEIGHT=$MAIN_HEIGHT
-    DETAIL_BOX_HEIGHT=$MAIN_HEIGHT
+    DETAIL_BOX_Y=$((MAIN_Y + LIST_BOX_HEIGHT + vertical_spacing))
 }
 
 # Draw box with title
@@ -210,34 +283,69 @@ draw_box() {
     echo -n "+"
 }
 
-# Draw header
+# Build consolidated status text for the header
+build_header_status() {
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local dl_count dl_size cpu_load mem_usage active total daemon_status
+    if [ -d "$DOWNLOAD_DIR" ]; then
+        dl_count=$(find "$DOWNLOAD_DIR" -type f 2>/dev/null | wc -l)
+        dl_size=$(du -sh "$DOWNLOAD_DIR" 2>/dev/null | cut -f1)
+    else
+        dl_count="0"
+        dl_size="0"
+    fi
+    cpu_load=$(uptime | awk -F'load average:' '{ print $2 }' | cut -d, -f1 | xargs)
+    mem_usage=$(free -h 2>/dev/null | awk '/^Mem:/ {print $3 "/" $2}')
+    if is_transmission_running; then
+        daemon_status="RUN"
+        active=$(get_active_count 2>/dev/null || echo "0")
+        total=$(get_total_count 2>/dev/null || echo "0")
+    else
+        daemon_status="OFF"
+        active="0"
+        total="0"
+    fi
+
+    echo "Time: $timestamp | Torrents: $active/$total ($daemon_status) | CPU: ${cpu_load:-N/A} | RAM: ${mem_usage:-N/A} | Downloads: ${dl_count:-0} files ${dl_size:-0}"
+}
+
+# Draw header with only the dynamic status line (no banner/logo)
 draw_header() {
-    local title="*** BITS TORRENT DOWNLOADER DASHBOARD ***"
-    local subtitle="Real-time Monitoring - Terminal: ${TERM_WIDTH}x${TERM_HEIGHT} - Download: ${DOWNLOAD_DIR}"
+    local status_text
+    status_text="$(build_header_status)"
+    local max_status_width=$((TERM_WIDTH - 2))
+    status_text="$(trim_text "$status_text" "$max_status_width")"
+    local status_pos=$(( TERM_WIDTH - ${#status_text} - 1 ))
+    [ $status_pos -lt 0 ] && status_pos=0
 
-    # Row 0: title on blue
-    echo -ne "${COLORS[BG_BLUE]}${COLORS[WHITE]}${COLORS[BOLD]}"
+    tput cup 0 0
+    echo -ne "${COLORS[BG_BLUE]}${COLORS[CYAN]}${COLORS[BOLD]}"
     printf "%${TERM_WIDTH}s" " "
-    local title_pos=$(( (TERM_WIDTH - ${#title}) / 2 ))
-    [ $title_pos -lt 0 ] && title_pos=0
-    tput cup 0 $title_pos
-    echo -n "$title"
-
-    # Row 1: subtitle on blue
-    tput cup 1 0
-    echo -ne "${COLORS[BG_BLUE]}${COLORS[CYAN]}${COLORS[DIM]}"
-    printf "%${TERM_WIDTH}s" " "
-    local subtitle_pos=$(( (TERM_WIDTH - ${#subtitle}) / 2 ))
-    [ $subtitle_pos -lt 0 ] && subtitle_pos=0
-    tput cup 1 $subtitle_pos
-    echo -n "$subtitle"
+    tput cup 0 $status_pos
+    echo -ne "$status_text${COLORS[RESET]}"
 
     # Separator line
-    tput cup 2 0
+    tput cup 1 0
     echo -ne "${COLORS[BLUE]}"
     draw_line "=" $TERM_WIDTH
     echo -ne "${COLORS[RESET]}"
 }
+
+# Update only the status line (row 0) without redrawing the whole screen
+draw_header_status_line() {
+    local status_text
+    status_text="$(build_header_status)"
+    local max_status_width=$((TERM_WIDTH - 2))
+    status_text="$(trim_text "$status_text" "$max_status_width")"
+    local status_pos=$(( TERM_WIDTH - ${#status_text} - 1 ))
+    [ $status_pos -lt 0 ] && status_pos=0
+
+    tput cup 0 0
+    echo -ne "${COLORS[BG_BLUE]}${COLORS[CYAN]}${COLORS[BOLD]}"
+    printf "%${TERM_WIDTH}s" " "
+    tput cup 0 $status_pos
+    echo -ne "$status_text${COLORS[RESET]}"
+} 
 
 # Draw footer
 draw_footer() {
@@ -248,7 +356,7 @@ draw_footer() {
     echo -ne "${COLORS[BG_BLACK]}${COLORS[CYAN]}"
     printf "%${TERM_WIDTH}s" " "
 
-    local footer_text="Arrows: Move/Scroll  Tab: Switch Focus  R: Refresh  D: Delete  Q: Quit"
+    local footer_text="Arrows: Move/Scroll  Tab: Switch Focus  R: Refresh  B: Boost  D: Delete  Q: Quit"
     local footer_pos=$(( (TERM_WIDTH - ${#footer_text}) / 2 ))
     tput cup $footer_y $footer_pos
     echo -n "$footer_text"
@@ -271,9 +379,21 @@ draw_footer() {
 
     echo -ne "${COLORS[RESET]}  ${COLORS[CYAN]}$focus_text${COLORS[RESET]}"
 
-    tput cup $((footer_y + 1)) $((TERM_WIDTH - ${#timestamp} - 1))
-    echo -n "$timestamp"
+    local signature="Made with ♥ by BIMMERCODES ⧉ github.com/bimmercodes"
+    tput cup $((footer_y + 1)) $((TERM_WIDTH - ${#signature} - 1))
+    echo -n "$signature"
     echo -ne "${COLORS[RESET]}"
+}
+
+# Redraw only the sections with frequently changing data to avoid full-screen refresh flicker
+refresh_dynamic_sections() {
+    draw_header_status_line
+    draw_torrent_section
+    draw_torrent_details
+    if [ $FOOTER_DIRTY -eq 1 ]; then
+        draw_footer
+        FOOTER_DIRTY=0
+    fi
 }
 
 # Get torrent stats
@@ -288,10 +408,13 @@ get_torrent_stats() {
 # Build detail lines for the selected torrent (used for scrolling)
 build_detail_lines() {
     local id_field="$1"
+    local info="${2:-}"
     DETAIL_LINES=()
+    WRAPPED_DETAIL_LINES=()
 
-    local info
-    info="$(get_torrent_info "$id_field")"
+    if [ -z "$info" ]; then
+        info="$(get_cached_info "$id_field")"
+    fi
     if [ -z "$info" ]; then
         DETAIL_LINES+=("Unable to load torrent details.")
         return
@@ -346,10 +469,29 @@ build_detail_lines() {
     fi
 }
 
+# Wrap detail lines to fit a given width
+wrap_detail_lines() {
+    local width="$1"
+    WRAPPED_DETAIL_LINES=()
+
+    for line in "${DETAIL_LINES[@]}"; do
+        local remaining="$line"
+        if [ ${#remaining} -le "$width" ]; then
+            WRAPPED_DETAIL_LINES+=("$remaining")
+            continue
+        fi
+        while [ -n "$remaining" ]; do
+            local segment="${remaining:0:$width}"
+            WRAPPED_DETAIL_LINES+=("$segment")
+            remaining="${remaining:$width}"
+        done
+    done
+}
+
 # Ensure detail scroll offset stays within bounds
 clamp_detail_scroll() {
     local visible_height=$((DETAIL_BOX_HEIGHT - 2))
-    local max_offset=$(( ${#DETAIL_LINES[@]} - visible_height ))
+    local max_offset=$(( ${#WRAPPED_DETAIL_LINES[@]} - visible_height ))
     (( max_offset < 0 )) && max_offset=0
 
     (( DETAIL_SCROLL_OFFSET < 0 )) && DETAIL_SCROLL_OFFSET=0
@@ -378,13 +520,20 @@ draw_torrent_section() {
     # Refresh torrent data only when needed (avoid lag on scroll)
     if [ $REFRESH_TORRENTS -eq 1 ]; then
         mapfile -t raw_torrents < <(get_torrent_stats)
-        HEADER_LINE=$(printf "%-4s %-11s %-10s %-10s %-10s %s" "ID" "OnDisk" "Down" "Up" "Status" "Name")
+        HEADER_LINE=$(printf "%-4s %-11s %-10s %-10s %-10s %-7s %s" \
+            "ID" "OnDisk" "Down" "Up" "Status" "Pct" "Name")
 
         TORRENT_CACHE=()
+        TORRENT_INFO_CACHE=()
+        TORRENT_SIZE_CACHE=()
         for ((i=1; i<${#raw_torrents[@]}; i++)); do
             line="${raw_torrents[$i]}"
             [[ "$line" =~ ^Sum: ]] && continue
             TORRENT_CACHE+=("$line")
+            local id=$(echo "$line" | awk '{print $1}' | tr -d '*')
+            local info="$(get_cached_info "$id")"
+            TORRENT_INFO_CACHE["$id"]="$info"
+            TORRENT_SIZE_CACHE["$id"]="$(compute_ondisk_size "$id" "$info")"
         done
 
         TORRENT_TOTAL_LINES=${#TORRENT_CACHE[@]}
@@ -430,7 +579,8 @@ draw_torrent_section() {
         if [ $idx -lt $TORRENT_TOTAL_LINES ]; then
             local line="${TORRENT_CACHE[$idx]}"
             local id=$(echo "$line" | awk '{print $1}' | tr -d '*')
-            local info="$(get_torrent_info "$id")"
+            local info="${TORRENT_INFO_CACHE[$id]}"
+            [ -z "$info" ] && info="$(get_cached_info "$id")"
             local status=$(echo "$info" | awk '/^ *State:/ {sub(/^[^:]*: */,""); print}')
             local percent=$(echo "$info" | awk '/^ *Percent Done:/ {print $3}')
 
@@ -451,7 +601,7 @@ draw_torrent_section() {
             fi
 
             local display_line
-            display_line=$(format_torrent_row "$line" "$content_width" "$info")
+            display_line=$(format_torrent_row "$line" "$content_width" "$info" "${TORRENT_SIZE_CACHE[$id]}")
             printf "%-${content_width}s" "$display_line"
             echo -ne "${COLORS[RESET]}"
         else
@@ -463,7 +613,7 @@ draw_torrent_section() {
 # Draw torrent details for selected torrent (scrollable)
 draw_torrent_details() {
     local box_x=$DETAIL_BOX_X
-    local box_y=$MAIN_Y
+    local box_y=$DETAIL_BOX_Y
     local box_width=$DETAIL_BOX_WIDTH
     local box_height=$DETAIL_BOX_HEIGHT
     local title="TORRENT DETAILS"
@@ -485,82 +635,28 @@ draw_torrent_details() {
     local selected_line="${TORRENT_CACHE[$SELECTED_INDEX]}"
     local id_field=$(echo "$selected_line" | awk '{print $1}')
 
-    build_detail_lines "$id_field"
+    local cached_info="${TORRENT_INFO_CACHE[$id_field]}"
+    if [ -z "$cached_info" ]; then
+        cached_info="$(get_cached_info "$id_field")"
+    fi
+
+    build_detail_lines "$id_field" "$cached_info"
+    wrap_detail_lines "$content_width"
 
     clamp_detail_scroll
-    local total_lines=${#DETAIL_LINES[@]}
+    local total_lines=${#WRAPPED_DETAIL_LINES[@]}
 
     for ((i=0; i<content_height; i++)); do
         local idx=$((i + DETAIL_SCROLL_OFFSET))
         tput cup $((content_y + i)) $content_x
 
         if [ $idx -lt $total_lines ]; then
-            local line="${DETAIL_LINES[$idx]}"
-            printf "%-${content_width}s" "${line:0:$content_width}"
+            local line="${WRAPPED_DETAIL_LINES[$idx]}"
+            printf "%-${content_width}s" "$line"
         else
             printf "%-${content_width}s" " "
         fi
     done
-}
-
-# Draw stats section
-draw_stats_section() {
-    local stats_y=$STATS_Y
-    local stats_height=$STATS_HEIGHT
-    local inner_height=$((stats_height - 2))
-
-    # Three columns for stats
-    local col_width=$((TERM_WIDTH / 3))
-    (( col_width < 12 )) && col_width=12
-
-    # Download stats
-    draw_box "DOWNLOADS" $stats_y 1 $col_width $stats_height
-    if [ $inner_height -ge 1 ]; then
-        tput cup $((stats_y + 1)) 3
-        if [ -d "$DOWNLOAD_DIR" ]; then
-            local dl_count=$(find "$DOWNLOAD_DIR" -type f 2>/dev/null | wc -l)
-            echo -ne "${COLORS[GREEN]}Files: $dl_count${COLORS[RESET]}"
-        else
-            echo -ne "${COLORS[RED]}Dir not found${COLORS[RESET]}"
-        fi
-    fi
-    if [ $inner_height -ge 2 ]; then
-        tput cup $((stats_y + 2)) 3
-        local dl_size=$(du -sh "$DOWNLOAD_DIR" 2>/dev/null | cut -f1)
-        echo -ne "${COLORS[CYAN]}Size: ${dl_size:-0}${COLORS[RESET]}"
-    fi
-
-    # System stats
-    draw_box "SYSTEM" $stats_y $((col_width + 1)) $col_width $stats_height
-    if [ $inner_height -ge 1 ]; then
-        tput cup $((stats_y + 1)) $((col_width + 3))
-        local cpu_load=$(uptime | awk -F'load average:' '{ print $2 }' | cut -d, -f1 | xargs)
-        echo -ne "${COLORS[YELLOW]}Load: $cpu_load${COLORS[RESET]}"
-    fi
-    if [ $inner_height -ge 2 ]; then
-        tput cup $((stats_y + 2)) $((col_width + 3))
-        local mem_usage=$(free -h 2>/dev/null | awk '/^Mem:/ {print $3 "/" $2}')
-        echo -ne "${COLORS[MAGENTA]}RAM: $mem_usage${COLORS[RESET]}"
-    fi
-
-    # Network/Torrent stats
-    local status_width=$((TERM_WIDTH - col_width * 2 - 2))
-    (( status_width < 12 )) && status_width=12
-    draw_box "TORRENT STATUS" $stats_y $((col_width * 2 + 1)) $status_width $stats_height
-    if [ $inner_height -ge 1 ]; then
-        tput cup $((stats_y + 1)) $((col_width * 2 + 3))
-        if is_transmission_running; then
-            local active=$(get_active_count 2>/dev/null || echo "0")
-            echo -ne "${COLORS[GREEN]}Active: $active${COLORS[RESET]}"
-        else
-            echo -ne "${COLORS[RED]}Daemon: OFF${COLORS[RESET]}"
-        fi
-    fi
-    if [ $inner_height -ge 2 ]; then
-        tput cup $((stats_y + 2)) $((col_width * 2 + 3))
-        local total=$(get_total_count 2>/dev/null || echo "0")
-        echo -ne "${COLORS[BLUE]}Total: $total${COLORS[RESET]}"
-    fi
 }
 
 # Main draw function
@@ -581,7 +677,6 @@ draw_screen() {
     draw_header
     draw_torrent_section
     draw_torrent_details
-    draw_stats_section
     draw_footer
 
     # Keep cursor hidden during updates
@@ -626,8 +721,10 @@ delete_selected_torrent() {
     echo -ne "${COLORS[RESET]}"
     printf "%-${TERM_WIDTH}s" " Delete torrent #$id_field (${torrent_name:0:$name_width})? [y/N] "
 
+    # With non-canonical mode enabled globally, this read would otherwise return immediately.
+    # Wait briefly to allow the user to answer the prompt.
     local choice
-    read -rsn1 choice
+    read -rsn1 -t 5 choice || choice=""
 
     # Clear the prompt line immediately after input
     tput cup $prompt_y 0
@@ -638,13 +735,33 @@ delete_selected_torrent() {
         REFRESH_TORRENTS=1
     fi
 
-    NEED_REDRAW=1
+    CONTENT_DIRTY=1
+    FOOTER_DIRTY=1
+}
+
+# Force start and reannounce the selected torrent to try to speed it up
+boost_selected_torrent() {
+    if [ $TORRENT_TOTAL_LINES -eq 0 ]; then
+        return
+    fi
+
+    if ! is_transmission_running; then
+        return
+    fi
+
+    local selected_line="${TORRENT_CACHE[$SELECTED_INDEX]}"
+    local id_field=$(echo "$selected_line" | awk '{print $1}')
+
+    force_start_torrent "$id_field"
+    REFRESH_TORRENTS=1
+    CONTENT_DIRTY=1
+    FOOTER_DIRTY=1
 }
 
 # Handle user input (FIXED: Now properly starts/stops torrents)
 handle_input() {
-    local key
-    read -rsn1 -t 0.1 key
+    local key=""
+    read -rsn1 -t 0.1 key || key=""
 
     # Capture escape sequences for arrow keys
     if [[ "$key" == $'\e' ]]; then
@@ -653,33 +770,42 @@ handle_input() {
         key+="$rest"
     fi
 
+    # Nothing pressed
+    [ -z "$key" ] && return
+
     case "$key" in
         q|Q)
             cleanup
             ;;
         r|R)
-            NEED_REDRAW=1
             REFRESH_TORRENTS=1
+            CONTENT_DIRTY=1
+            FOOTER_DIRTY=1
             ;;
-        $'\t')
+        $'\t'|$'\e[Z') # Tab or reverse-tab
             if [ "$ACTIVE_PANE" = "list" ]; then
                 ACTIVE_PANE="details"
+                DETAIL_SCROLL_OFFSET=0
             else
                 ACTIVE_PANE="list"
             fi
-            NEED_REDRAW=1
+            CONTENT_DIRTY=1
+            NEED_REDRAW=1  # ensure box titles/highlights update immediately
+            FOOTER_DIRTY=1
             ;;
         $'\e[A') # Up arrow
             if [ "$ACTIVE_PANE" = "list" ]; then
                 if [ $SELECTED_INDEX -gt 0 ]; then
                     SELECTED_INDEX=$((SELECTED_INDEX - 1))
                     DETAIL_SCROLL_OFFSET=0
-                    NEED_REDRAW=1
+                    CONTENT_DIRTY=1
+                    FOOTER_DIRTY=1
                 fi
             else
                 DETAIL_SCROLL_OFFSET=$((DETAIL_SCROLL_OFFSET - 1))
                 clamp_detail_scroll
-                NEED_REDRAW=1
+                CONTENT_DIRTY=1
+                FOOTER_DIRTY=1
             fi
             ;;
         $'\e[B') # Down arrow
@@ -687,12 +813,14 @@ handle_input() {
                 if [ $TORRENT_TOTAL_LINES -gt 0 ] && [ $SELECTED_INDEX -lt $((TORRENT_TOTAL_LINES - 1)) ]; then
                     SELECTED_INDEX=$((SELECTED_INDEX + 1))
                     DETAIL_SCROLL_OFFSET=0
-                    NEED_REDRAW=1
+                    CONTENT_DIRTY=1
+                    FOOTER_DIRTY=1
                 fi
             else
                 DETAIL_SCROLL_OFFSET=$((DETAIL_SCROLL_OFFSET + 1))
                 clamp_detail_scroll
-                NEED_REDRAW=1
+                CONTENT_DIRTY=1
+                FOOTER_DIRTY=1
             fi
             ;;
         s|S)
@@ -700,31 +828,42 @@ handle_input() {
             if ! pgrep -f "torrent_manager.sh" > /dev/null; then
                 nohup "$PROJECT_ROOT/lib/torrent_manager.sh" > "$LOG_DIR/nohup.log" 2>&1 &
             fi
-            NEED_REDRAW=1
+            REFRESH_TORRENTS=1
+            CONTENT_DIRTY=1
+            FOOTER_DIRTY=1
             ;;
         t|T)
             # Stop all torrents
             if is_transmission_running; then
                 stop_torrent "all"
             fi
-            NEED_REDRAW=1
+            REFRESH_TORRENTS=1
+            CONTENT_DIRTY=1
+            FOOTER_DIRTY=1
             ;;
         p|P)
             # Pause all torrents
             if is_transmission_running; then
                 stop_torrent "all"
             fi
-            NEED_REDRAW=1
+            REFRESH_TORRENTS=1
+            CONTENT_DIRTY=1
+            FOOTER_DIRTY=1
             ;;
         u|U)
             # Resume all torrents
             if is_transmission_running; then
                 start_torrent "all"
             fi
-            NEED_REDRAW=1
+            REFRESH_TORRENTS=1
+            CONTENT_DIRTY=1
+            FOOTER_DIRTY=1
             ;;
         d|D)
             delete_selected_torrent
+            ;;
+        b|B)
+            boost_selected_torrent
             ;;
     esac
 }
@@ -746,25 +885,34 @@ main() {
 
     # Main loop
     while [ $RUNNING -eq 1 ]; do
-        # Handle resize
+        # Handle resize or layout changes
         if [ $NEED_REDRAW -eq 1 ]; then
             draw_screen
             NEED_REDRAW=0
+            CONTENT_DIRTY=0
             LAST_REFRESH=$(date +%s)
+            continue
         fi
 
-        # Handle input
+        # Handle input (may mark CONTENT_DIRTY/REFRESH_TORRENTS)
         handle_input
 
-        # Auto-refresh every 2 seconds
-        sleep 0.1
-
-        # Periodic redraw (only if 2 seconds have passed)
         local current_time=$(date +%s)
+
+        # Periodic data refresh without full redraw
         if [ $((current_time - LAST_REFRESH)) -ge 2 ]; then
             REFRESH_TORRENTS=1
-            NEED_REDRAW=1
+            CONTENT_DIRTY=1
+            FOOTER_DIRTY=1
         fi
+
+        if [ $CONTENT_DIRTY -eq 1 ]; then
+            refresh_dynamic_sections
+            CONTENT_DIRTY=0
+            LAST_REFRESH=$current_time
+        fi
+
+        sleep 0.1
     done
 }
 

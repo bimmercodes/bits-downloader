@@ -4,8 +4,8 @@
 # Single Responsibility: Load and provide configuration
 # Dependency Inversion: All scripts depend on this abstraction
 
-# Determine project root
-if [ -n "$PROJECT_ROOT" ]; then
+# Determine project root (PROJECT_ROOT may be unset under 'set -u' callers)
+if [ -n "${PROJECT_ROOT-}" ]; then
     CONFIG_PROJECT_ROOT="$PROJECT_ROOT"
 elif [ -n "$BASH_SOURCE" ]; then
     LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
