@@ -43,6 +43,7 @@ DETAIL_BOX_HEIGHT=0
 # Focus/scrolling
 ACTIVE_PANE="list"   # list | details
 DETAIL_SCROLL_OFFSET=0
+ORIG_STTY=""
 
 # Extract raw byte count from a transmission info line like "(1,234 bytes)"
 extract_bytes_from_line() {
@@ -51,6 +52,79 @@ extract_bytes_from_line() {
         local bytes="${BASH_REMATCH[1]//,/}"
         echo "$bytes"
     fi
+}
+
+# Format a torrent row showing on-disk size instead of "Done"
+format_torrent_row() {
+    local raw_line="$1"
+    local width="$2"
+    local provided_info="${3:-}"
+
+    local id=$(echo "$raw_line" | awk '{print $1}' | tr -d '*')
+    local info="$provided_info"
+    if [ -z "$info" ]; then
+        info="$(get_torrent_info "$id")"
+    fi
+    if [ -z "$info" ]; then
+        printf "%-${width}s" "N/A"
+        return
+    fi
+
+    local name status down up location percent
+    name=$(echo "$info" | awk '/^ *Name:/ {sub(/^[^:]*: */,""); print}')
+    status=$(echo "$info" | awk '/^ *State:/ {sub(/^[^:]*: */,""); print}')
+    down=$(echo "$info" | awk '/^ *Download Speed:/ {print $3, $4}')
+    up=$(echo "$info" | awk '/^ *Upload Speed:/ {print $3, $4}')
+    location=$(echo "$info" | awk '/^ *Location:/ {sub(/^[^:]*: */,""); print}')
+    percent=$(echo "$info" | awk '/^ *Percent Done:/ {print $3}')
+
+    # Compute on-disk size using du; fall back to "Have" bytes
+    local ondisk="N/A"
+    if [ -n "$location" ]; then
+        local target="$location"
+        if [ -n "$name" ] && [ -e "$location/.incomplete/$name" ]; then
+            target="$location/.incomplete/$name"
+        elif [ -n "$name" ] && [ -e "$location/$name" ]; then
+            target="$location/$name"
+        fi
+        local size_bytes=$(du -sb "$target" 2>/dev/null | awk '{print $1}')
+        if [ -n "$size_bytes" ]; then
+            if command -v numfmt >/dev/null 2>&1; then
+                ondisk=$(numfmt --to=iec-i "$size_bytes")
+            else
+                ondisk=$(format_bytes "$size_bytes")
+            fi
+        fi
+    fi
+    if [ "$ondisk" = "N/A" ]; then
+        local have_bytes=$(extract_bytes_from_line "$(echo "$info" | grep "^ *Have:")")
+        if [ -n "$have_bytes" ]; then
+            if command -v numfmt >/dev/null 2>&1; then
+                ondisk=$(numfmt --to=iec-i "$have_bytes")
+            else
+                ondisk=$(format_bytes "$have_bytes")
+            fi
+        fi
+    fi
+
+    # Build formatted row
+    local col_id_width=4
+    local col_size_width=11
+    local col_down_width=10
+    local col_up_width=10
+    local col_status_width=10
+    local name_width=$((width - col_id_width - col_size_width - col_down_width - col_up_width - col_status_width - 5))
+    (( name_width < 5 )) && name_width=5
+
+    local display_name="${name:0:$name_width}"
+
+    printf "%-*s %-*s %-*s %-*s %-*s %s" \
+        "$col_id_width" "$id" \
+        "$col_size_width" "$ondisk" \
+        "$col_down_width" "${down:-0}" \
+        "$col_up_width" "${up:-0}" \
+        "$col_status_width" "${status:0:$col_status_width}" \
+        "$display_name"
 }
 
 # Calculate layout to avoid overlaps and stay responsive
@@ -304,7 +378,7 @@ draw_torrent_section() {
     # Refresh torrent data only when needed (avoid lag on scroll)
     if [ $REFRESH_TORRENTS -eq 1 ]; then
         mapfile -t raw_torrents < <(get_torrent_stats)
-        HEADER_LINE="${raw_torrents[0]}"
+        HEADER_LINE=$(printf "%-4s %-11s %-10s %-10s %-10s %s" "ID" "OnDisk" "Down" "Up" "Status" "Name")
 
         TORRENT_CACHE=()
         for ((i=1; i<${#raw_torrents[@]}; i++)); do
@@ -355,13 +429,17 @@ draw_torrent_section() {
 
         if [ $idx -lt $TORRENT_TOTAL_LINES ]; then
             local line="${TORRENT_CACHE[$idx]}"
+            local id=$(echo "$line" | awk '{print $1}' | tr -d '*')
+            local info="$(get_torrent_info "$id")"
+            local status=$(echo "$info" | awk '/^ *State:/ {sub(/^[^:]*: */,""); print}')
+            local percent=$(echo "$info" | awk '/^ *Percent Done:/ {print $3}')
 
-            # Colorize based on status
-            if [[ "$line" =~ "100%" ]] || [[ "$line" =~ "Seeding" ]]; then
+            # Colorize based on status/percent
+            if [[ "$percent" == "100%" ]] || [[ "$status" =~ [Ss]eeding ]]; then
                 echo -ne "${COLORS[GREEN]}"
-            elif [[ "$line" =~ "Downloading" ]] || [[ "$line" =~ "Up & Down" ]]; then
+            elif [[ "$status" =~ [Dd]ownloading ]] || [[ "$status" =~ "Up & Down" ]]; then
                 echo -ne "${COLORS[YELLOW]}"
-            elif [[ "$line" =~ "Stopped" ]] || [[ "$line" =~ "Idle" ]]; then
+            elif [[ "$status" =~ [Ss]topped ]] || [[ "$status" =~ [Ii]dle ]]; then
                 echo -ne "${COLORS[RED]}"
             else
                 echo -ne "${COLORS[CYAN]}"
@@ -372,8 +450,8 @@ draw_torrent_section() {
                 echo -ne "${COLORS[BG_CYAN]}${COLORS[BLUE]}"
             fi
 
-            # Truncate line to fit
-            local display_line="${line:0:$content_width}"
+            local display_line
+            display_line=$(format_torrent_row "$line" "$content_width" "$info")
             printf "%-${content_width}s" "$display_line"
             echo -ne "${COLORS[RESET]}"
         else
@@ -519,7 +597,11 @@ handle_resize() {
 cleanup() {
     echo -ne "$SHOW_CURSOR$CLEAR_SCREEN$CURSOR_HOME"
     echo -e "${COLORS[GREEN]}Dashboard stopped. Goodbye!${COLORS[RESET]}"
-    stty echo
+    if [ -n "$ORIG_STTY" ]; then
+        stty "$ORIG_STTY" 2>/dev/null || stty echo
+    else
+        stty echo
+    fi
     RUNNING=0
     exit 0
 }
@@ -654,7 +736,8 @@ main() {
     trap handle_resize WINCH
 
     # Disable input echo
-    stty -echo
+    ORIG_STTY=$(stty -g)
+    stty -echo -icanon time 0 min 0
 
     echo -ne "$HIDE_CURSOR"
 
